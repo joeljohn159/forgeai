@@ -161,12 +161,18 @@ export class Orchestrator {
     story: Story,
     context: { plan: Plan }
   ): string {
+    const refsDir = ".forge/designs/references";
+
     return `
       You are designing the UI for: "${story.title}"
 
       Description: ${story.description}
       App: ${context.plan.project} (${context.plan.framework})
       Full app context: ${context.plan.description}
+
+      DESIGN REFERENCES:
+      Check if ${refsDir}/ exists and contains reference images.
+      If so, read them and match their visual style, color palette, typography, and layout.
 
       Create a Storybook story file that renders this component/page.
       The file should be at: stories/${story.id}.stories.tsx

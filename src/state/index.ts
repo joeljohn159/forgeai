@@ -110,6 +110,7 @@ class StateManager {
     action: string;
     storyId: string | null;
     branch: string;
+    commitBefore?: string;
   }): Promise<string> {
     const state = await this.getState();
     const id = String(state.history.length + 1).padStart(3, "0");
@@ -119,9 +120,9 @@ class StateManager {
       action: data.action,
       storyId: data.storyId,
       timestamp: new Date().toISOString(),
-      files: [], // TODO: populate with actual file hashes
+      files: [],
       branch: data.branch,
-      commitBefore: "", // TODO: get from git
+      commitBefore: data.commitBefore || "",
     };
 
     await this.writeJson(
@@ -145,6 +146,41 @@ class StateManager {
     const match = files.find((f) => f.startsWith(id));
     if (!match) return null;
     return this.readJson<Snapshot>(path.join(dir, match));
+  }
+
+  async listSnapshots(): Promise<Snapshot[]> {
+    const dir = this.forgePath(SNAPSHOTS_DIR);
+    const files = await fs.readdir(dir).catch(() => []);
+    const snapshots: Snapshot[] = [];
+    for (const file of files.filter((f) => f.endsWith(".json"))) {
+      const snapshot = await this.readJson<Snapshot>(path.join(dir, file));
+      if (snapshot) snapshots.push(snapshot);
+    }
+    return snapshots.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  }
+
+  // ── Design References ──────────────────────────────────────
+
+  async saveDesignReferences(files: string[]): Promise<void> {
+    const refDir = this.forgePath("designs", "references");
+    await fs.mkdir(refDir, { recursive: true });
+
+    const manifest: Array<{ original: string; saved: string }> = [];
+    for (const file of files) {
+      const basename = path.basename(file);
+      const dest = path.join(refDir, basename);
+      await fs.copyFile(file, dest);
+      manifest.push({ original: file, saved: dest });
+    }
+
+    await this.writeJson(this.forgePath("designs", "references.json"), manifest);
+  }
+
+  async getDesignReferences(): Promise<string[]> {
+    const manifest = await this.readJson<Array<{ saved: string }>>(
+      this.forgePath("designs", "references.json")
+    );
+    return manifest?.map((r) => r.saved) || [];
   }
 
   // ── Helpers ───────────────────────────────────────────────

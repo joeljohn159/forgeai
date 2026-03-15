@@ -3,6 +3,9 @@
 // ============================================================
 
 import chalk from "chalk";
+import fs from "fs/promises";
+import path from "path";
+import ora from "ora";
 import { stateManager } from "../../state/index.js";
 import { Pipeline } from "../../core/pipeline/index.js";
 
@@ -24,13 +27,63 @@ export async function designCommand(options?: {
     return;
   }
 
+  // ── Design Import ───────────────────────────────────────
   if (options?.import) {
-    console.log(chalk.bold("\n  📁 Importing designs from: " + options.import));
-    // TODO: Import user's existing designs, map to stories
-    console.log(chalk.yellow("  Design import coming in v0.2\n"));
+    await importDesigns(options.import);
     return;
   }
 
   const pipeline = new Pipeline(config);
   await pipeline.runDesignPhase(plan);
+}
+
+/** Import design files (screenshots, mockups) as references */
+async function importDesigns(importPath: string): Promise<void> {
+  const spinner = ora({ text: "Importing designs...", indent: 2 }).start();
+
+  const absPath = path.resolve(importPath);
+
+  // Check if path exists
+  try {
+    const stat = await fs.stat(absPath);
+
+    let files: string[] = [];
+
+    if (stat.isDirectory()) {
+      // Import all image files from directory
+      const entries = await fs.readdir(absPath);
+      const imageExts = [".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif"];
+      files = entries
+        .filter((f) => imageExts.includes(path.extname(f).toLowerCase()))
+        .map((f) => path.join(absPath, f));
+    } else {
+      // Single file
+      files = [absPath];
+    }
+
+    if (files.length === 0) {
+      spinner.warn("No image files found (png, jpg, svg, webp, gif)");
+      return;
+    }
+
+    // Copy to .forge/designs/references/
+    await stateManager.saveDesignReferences(files);
+
+    spinner.succeed(`Imported ${files.length} design reference${files.length > 1 ? "s" : ""}`);
+
+    console.log("");
+    for (const file of files) {
+      console.log(chalk.dim(`    ${path.basename(file)}`));
+    }
+    console.log("");
+
+    console.log(
+      chalk.dim("  These references will be used in the design and build phases.")
+    );
+    console.log(
+      chalk.dim("  The AI agent will read them and match the visual style.\n")
+    );
+  } catch {
+    spinner.fail(`Path not found: ${absPath}`);
+  }
 }

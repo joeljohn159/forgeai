@@ -1,5 +1,5 @@
 // ============================================================
-// forge undo — Revert the last agent action
+// forge undo — Revert agent actions using git revert
 // ============================================================
 
 import chalk from "chalk";
@@ -14,28 +14,32 @@ export async function undoCommand(options?: { steps?: string }) {
     return;
   }
 
-  const state = await stateManager.getState();
   const git = new GitManager();
 
-  console.log(chalk.bold("\n⏪ Forge Undo\n"));
+  console.log(chalk.bold("\n  Forge Undo\n"));
 
-  if (state.history.length === 0) {
+  // Get recent forge commits
+  const log = await git.getForgeLog(parseInt(options?.steps || "10", 10));
+  const forgeCommits = log.filter(
+    (c) =>
+      c.message.startsWith("feat:") ||
+      c.message.startsWith("fix:") ||
+      c.message.startsWith("docs:")
+  );
+
+  if (forgeCommits.length === 0) {
     console.log(chalk.dim("  No actions to undo.\n"));
     return;
   }
 
-  // Show recent history
-  const count = parseInt(options?.steps || "5", 10);
-  const recent = state.history.slice(-count).reverse();
-
-  console.log(chalk.bold("  Recent actions:\n"));
-
-  const choices = recent.map((entry, index) => {
-    const time = new Date(entry.timestamp).toLocaleTimeString();
-    const story = entry.storyId ? ` (${entry.storyId})` : "";
+  // Show commits to choose from
+  const choices = forgeCommits.map((commit) => {
+    const date = new Date(commit.date);
+    const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const hash = commit.hash.slice(0, 7);
     return {
-      name: `  ${index + 1}. [${time}] ${entry.action}${story} — ${entry.details}`,
-      value: entry,
+      name: `  ${chalk.dim(hash)}  ${commit.message}  ${chalk.dim(timeStr)}`,
+      value: commit,
     };
   });
 
@@ -43,7 +47,7 @@ export async function undoCommand(options?: { steps?: string }) {
     {
       type: "list",
       name: "selected",
-      message: "Undo which action?",
+      message: "Which action to undo?",
       choices: [
         ...choices,
         new inquirer.Separator(),
@@ -62,7 +66,7 @@ export async function undoCommand(options?: { steps?: string }) {
     {
       type: "confirm",
       name: "confirm",
-      message: `Undo "${selected.action}"? This will revert files to their previous state.`,
+      message: `Revert "${selected.message}"? This creates a new commit that undoes those changes.`,
       default: false,
     },
   ]);
@@ -72,48 +76,43 @@ export async function undoCommand(options?: { steps?: string }) {
     return;
   }
 
-  // Perform undo
-  if (selected.snapshotId) {
-    const snapshot = await stateManager.getSnapshot(selected.snapshotId);
+  // Perform git revert
+  try {
+    await git.revertCommit(selected.hash);
 
-    if (snapshot && snapshot.commitBefore) {
-      // Git-level rollback to the commit before this action
-      try {
-        await git.checkout("main");
-        // Reset to the commit before the action
-        // TODO: Implement proper file-level rollback using snapshot data
-        console.log(
-          chalk.green(`\n  ✅ Reverted to state before: ${selected.action}`)
-        );
-        console.log(chalk.dim(`     Snapshot: ${selected.snapshotId}\n`));
-      } catch (error) {
-        console.log(chalk.red(`\n  Failed to undo: ${error}\n`));
+    console.log(chalk.green(`\n  Reverted: ${selected.message}`));
+    console.log(chalk.dim(`  Commit ${selected.hash.slice(0, 7)} has been undone.\n`));
+
+    // Update forge state history
+    await stateManager.addHistoryEntry({
+      action: "undo",
+      storyId: null,
+      details: `Reverted: ${selected.message} (${selected.hash.slice(0, 7)})`,
+    });
+
+    // Update story status if it was a feat: commit
+    const plan = await stateManager.getPlan();
+    if (plan && selected.message.startsWith("feat:")) {
+      const storyTitle = selected.message.replace("feat: ", "");
+      const story = plan.epics
+        .flatMap((e) => e.stories)
+        .find((s) => s.title === storyTitle);
+
+      if (story && (story.status === "reviewing" || story.status === "done")) {
+        story.status = "planned";
+        await stateManager.savePlan(plan);
+        console.log(chalk.dim(`  Story "${story.title}" reset to planned.\n`));
       }
-    } else {
-      console.log(
-        chalk.yellow(
-          "\n  Snapshot exists but commit reference is missing."
-        )
-      );
-      console.log(
-        chalk.dim(
-          "  Try: git log --oneline to find the commit and git revert manually.\n"
-        )
-      );
     }
-  } else {
-    console.log(
-      chalk.yellow("\n  No snapshot available for this action.")
-    );
-    console.log(
-      chalk.dim("  Try: git log --oneline to revert manually.\n")
-    );
-  }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
 
-  // Update history
-  await stateManager.addHistoryEntry({
-    action: "undo",
-    storyId: selected.storyId,
-    details: `Undid: ${selected.action} — ${selected.details}`,
-  });
+    if (msg.includes("conflict")) {
+      console.log(chalk.red("\n  Revert has conflicts."));
+      console.log(chalk.dim("  Resolve them manually, then: git revert --continue\n"));
+    } else {
+      console.log(chalk.red(`\n  Failed to revert: ${msg}`));
+      console.log(chalk.dim("  Try manually: " + chalk.white(`git revert ${selected.hash.slice(0, 7)}`) + "\n"));
+    }
+  }
 }

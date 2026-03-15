@@ -13,6 +13,7 @@ import { Worker, type WorkerProgressCallback, type WorkerUsage } from "../worker
 import { GitManager } from "../git/index.js";
 import { stateManager } from "../../state/index.js";
 import { playSound } from "../utils/sound.js";
+import { GitHubSync } from "../github/index.js";
 
 // ============================================================
 // Autonomous Pipeline
@@ -80,6 +81,9 @@ export class AutoPipeline {
       await stateManager.updatePhase("plan");
       await this.git.commitState("Sprint plan");
       await this.git.tag("forge/v0.0-plan");
+
+      // Sync to GitHub Issues if enabled
+      await this.syncToGitHub(this.plan);
     } catch (err) {
       planSpinner.fail(`${this.elapsed()} Planning failed`);
       const msg = err instanceof Error ? err.message : String(err);
@@ -353,6 +357,15 @@ export class AutoPipeline {
     const progress = this.makeProgress(spinner, label);
 
     try {
+      // Snapshot before building (capture current HEAD for undo)
+      const headBefore = await this.git.getHead();
+      await stateManager.saveSnapshot({
+        action: "build",
+        storyId: story.id,
+        branch: "main",
+        commitBefore: headBefore,
+      });
+
       story.status = "building";
 
       const prompt = this.orchestrator.craftWorkerPrompt(story, "build", {
@@ -727,6 +740,24 @@ export class AutoPipeline {
 
   private formatCost(usd: number): string {
     return "$" + usd.toFixed(4);
+  }
+
+  // ── GitHub Sync ────────────────────────────────────────────
+
+  private async syncToGitHub(plan: Plan): Promise<void> {
+    if (!this.config.githubSync || !this.config.githubRepo) return;
+    if (!GitHubSync.isAvailable()) return;
+
+    try {
+      const gh = new GitHubSync(this.config.githubRepo);
+      await gh.ensureLabels();
+      const { created, updated } = await gh.syncPlan(plan);
+      if (created > 0 || updated > 0) {
+        console.log(chalk.dim(`  GitHub: ${created} issues created, ${updated} updated`));
+      }
+    } catch {
+      // Silently skip — GitHub sync is best-effort
+    }
   }
 
   // ── Helpers ───────────────────────────────────────────────

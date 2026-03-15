@@ -12,6 +12,7 @@ import { statusCommand } from "./commands/status.js";
 import { fixCommand } from "./commands/fix.js";
 import { undoCommand } from "./commands/undo.js";
 import { autoCommand } from "./commands/auto.js";
+import { historyCommand, checkoutCommand } from "./commands/history.js";
 
 const program = new Command();
 
@@ -22,7 +23,7 @@ program
       " — AI Development Orchestration Framework\n" +
       "  Structured multi-agent pipeline: plan → design → build → review"
   )
-  .version("0.1.0");
+  .version("0.2.0");
 
 // ── Commands ──────────────────────────────────────────────
 
@@ -43,7 +44,7 @@ program
   .command("design")
   .description("Generate and review design previews in Storybook")
   .option("-s, --story <storyId>", "Design a specific story only")
-  .option("--import <path>", "Import existing designs from a directory")
+  .option("--import <path>", "Import design references (screenshots, mockups)")
   .action(designCommand);
 
 program
@@ -76,7 +77,7 @@ program
 program
   .command("undo")
   .description("Revert the last agent action")
-  .option("-n, --steps <number>", "Number of actions to show", "5")
+  .option("-n, --steps <number>", "Number of commits to show", "10")
   .action(undoCommand);
 
 program
@@ -92,17 +93,13 @@ program
 
 program
   .command("history")
-  .description("Show all versions and checkpoints")
-  .action(() => {
-    console.log(chalk.yellow("Coming in v0.2"));
-  });
+  .description("Show version timeline, checkpoints, and activity log")
+  .action(historyCommand);
 
 program
   .command("checkout <version>")
-  .description("Jump to a specific version")
-  .action(() => {
-    console.log(chalk.yellow("Coming in v0.2"));
-  });
+  .description("Jump to a specific version or checkpoint")
+  .action(checkoutCommand);
 
 // ── Parse ─────────────────────────────────────────────────
 

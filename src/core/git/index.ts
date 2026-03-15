@@ -99,6 +99,37 @@ export class GitManager {
     return log.all as any[];
   }
 
+  /** Get the current HEAD commit hash */
+  async getHead(): Promise<string> {
+    const log = await this.git.log({ maxCount: 1 });
+    return log.latest?.hash || "";
+  }
+
+  /** Revert a specific commit (creates a new revert commit) */
+  async revertCommit(hash: string): Promise<void> {
+    await this.git.raw(["revert", "--no-edit", hash]);
+  }
+
+  /** Get forge-related commits (feat:, fix:, forge:, docs:, ci:) */
+  async getForgeLog(count: number = 20): Promise<Array<{ hash: string; date: string; message: string }>> {
+    const log = await this.git.log({ maxCount: count });
+    return (log.all as any[]).map((entry) => ({
+      hash: entry.hash,
+      date: entry.date,
+      message: entry.message,
+    }));
+  }
+
+  /** Get tags pointing at a specific commit */
+  async getTagsAtCommit(hash: string): Promise<string[]> {
+    try {
+      const result = await this.git.raw(["tag", "--points-at", hash]);
+      return result.trim().split("\n").filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
   // ── Status ────────────────────────────────────────────────
 
   async isClean(): Promise<boolean> {

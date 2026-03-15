@@ -4,21 +4,23 @@ import inquirer from "inquirer";
 import type {
   Plan,
   Story,
-  SprintState,
   ForgeConfig,
-  Phase,
   QueuedChange,
 } from "../../types/plan.js";
 import { Orchestrator } from "../orchestrator/index.js";
 import { Worker, type WorkerProgressCallback } from "../worker/index.js";
 import { GitManager } from "../git/index.js";
+import { getAdapter } from "../adapters/index.js";
 import { stateManager } from "../../state/index.js";
 
 // ============================================================
 // Pipeline Engine
 // Manages the phase flow: plan > design > build > review
 // with human review gates between each phase.
+// Builds on main — no feature branches. Per-story commits + tags.
 // ============================================================
+
+const MAX_REGEN_ATTEMPTS = 5;
 
 export class Pipeline {
   private orchestrator: Orchestrator;
@@ -31,7 +33,7 @@ export class Pipeline {
   constructor(config: ForgeConfig) {
     this.config = config;
     this.orchestrator = new Orchestrator(config);
-    this.worker = new Worker(config);
+    this.worker = new Worker(config, {});
     this.git = new GitManager();
   }
 
@@ -40,12 +42,20 @@ export class Pipeline {
   async runSprint(description: string): Promise<void> {
     console.log(chalk.bold("\n  forge") + chalk.dim(" sprint\n"));
 
+    await this.git.ensureRepo();
+    await this.git.ensureMainBranch();
+
     // Phase 1: Plan
     this.plan = await this.runPlanPhase(description);
     if (!this.plan) return;
 
-    // Phase 2: Design
-    await this.runDesignPhase(this.plan);
+    // Phase 2: Design (skip if framework doesn't support it)
+    const adapter = getAdapter(this.config.framework);
+    if (adapter.designSupport) {
+      await this.runDesignPhase(this.plan);
+    } else {
+      console.log(chalk.dim(`\n  Design skipped (${adapter.name} — no Storybook support)\n`));
+    }
 
     // Phase 3: Build
     await this.runBuildPhase(this.plan);
@@ -63,12 +73,21 @@ export class Pipeline {
 
   // ── Phase 1: Plan ────────────────────────────────────────
 
-  async runPlanPhase(description: string): Promise<Plan | null> {
-    console.log(chalk.bold("  Plan\n"));
+  async runPlanPhase(description: string, attempt = 1): Promise<Plan | null> {
+    if (attempt === 1) {
+      console.log(chalk.bold("  Plan\n"));
+    }
 
     const spinner = ora({ text: "Analyzing requirements...", indent: 2 }).start();
 
-    const plan = await this.orchestrator.generatePlan(description);
+    let plan: Plan;
+    try {
+      plan = await this.orchestrator.generatePlan(description);
+    } catch (err) {
+      spinner.fail("Plan generation failed");
+      console.log(chalk.red(`  ${err instanceof Error ? err.message : err}`));
+      return null;
+    }
     spinner.succeed("Plan generated");
 
     this.displayPlan(plan);
@@ -97,19 +116,26 @@ export class Pipeline {
         console.log(chalk.green("  Plan saved\n"));
         return plan;
 
-      case "edit":
+      case "edit": {
+        if (attempt >= MAX_REGEN_ATTEMPTS) {
+          console.log(chalk.yellow(`  Max edit attempts (${MAX_REGEN_ATTEMPTS}) reached. Approving current plan.`));
+          await stateManager.savePlan(plan);
+          return plan;
+        }
         const { changes } = await inquirer.prompt([
-          {
-            type: "input",
-            name: "changes",
-            message: "Describe changes:",
-          },
+          { type: "input", name: "changes", message: "Describe changes:" },
         ]);
         console.log(chalk.dim("  Re-planning..."));
-        return this.runPlanPhase(`${description}\n\nUser edits: ${changes}`);
+        return this.runPlanPhase(`${description}\n\nUser edits: ${changes}`, attempt + 1);
+      }
 
-      case "regen":
-        return this.runPlanPhase(description);
+      case "regen": {
+        if (attempt >= MAX_REGEN_ATTEMPTS) {
+          console.log(chalk.yellow(`  Max regeneration attempts (${MAX_REGEN_ATTEMPTS}) reached.`));
+          return null;
+        }
+        return this.runPlanPhase(description, attempt + 1);
+      }
 
       case "cancel":
         console.log(chalk.dim("  Cancelled."));
@@ -135,9 +161,7 @@ export class Pipeline {
     for (const story of uiStories) {
       const spinner = ora({ text: story.title, indent: 4 }).start();
 
-      const prompt = this.orchestrator.craftWorkerPrompt(story, "design", {
-        plan,
-      });
+      const prompt = this.orchestrator.craftWorkerPrompt(story, "design", { plan });
 
       const result = await this.worker.run("design", prompt, {
         onProgress: (event) => {
@@ -156,7 +180,8 @@ export class Pipeline {
       }
 
       // User gate
-      console.log(chalk.dim("    Preview: http://localhost:6006\n"));
+      const adapter = getAdapter(this.config.framework);
+      console.log(chalk.dim(`    Preview: http://localhost:${adapter.devPort}\n`));
 
       const { approval } = await inquirer.prompt([
         {
@@ -177,19 +202,19 @@ export class Pipeline {
         console.log(chalk.green(`    Approved\n`));
       } else if (approval === "change") {
         const { feedback } = await inquirer.prompt([
-          {
-            type: "input",
-            name: "feedback",
-            message: "Describe changes:",
-          },
+          { type: "input", name: "feedback", message: "Describe changes:" },
         ]);
-        console.log(chalk.dim("    Revising...\n"));
+        // Re-run design with feedback
+        const fixResult = await this.worker.run("fix", `Revise design for "${story.title}": ${feedback}`);
+        if (fixResult.success) {
+          console.log(chalk.dim("    Revised.\n"));
+        }
       }
     }
 
     await stateManager.savePlan(plan);
     await stateManager.updatePhase("design");
-    await this.git.commitState("All designs reviewed");
+    await this.git.commitAll("forge: designs reviewed");
     await this.git.tag("forge/v0.1-designs");
 
     console.log(chalk.dim("  Design phase complete\n"));
@@ -198,29 +223,31 @@ export class Pipeline {
   // ── Phase 3: Build ───────────────────────────────────────
 
   async runBuildPhase(plan: Plan): Promise<void> {
-    const allStories = this.getAllStories(plan);
-    const buildableStories = allStories.filter(
-      (s) =>
-        s.status === "design-approved" ||
-        s.status === "planned"
+    const buildableStories = this.getAllStories(plan).filter(
+      (s) => s.status === "design-approved" || s.status === "planned"
     );
+
+    if (buildableStories.length === 0) {
+      console.log(chalk.dim("\n  No stories to build.\n"));
+      return;
+    }
 
     console.log(chalk.bold(`\n  Build`) + chalk.dim(` · ${buildableStories.length} stories\n`));
 
     for (const story of buildableStories) {
       const spinner = ora({ text: story.title, indent: 4 }).start();
 
-      const branchName = `feature/${story.id}`;
-      await this.git.createBranch(branchName);
-      story.branch = branchName;
-      story.status = "building";
-      await stateManager.savePlan(plan);
-
+      // Snapshot before building
+      const headBefore = await this.git.getHead();
       await stateManager.saveSnapshot({
         action: "build",
         storyId: story.id,
-        branch: branchName,
+        branch: "main",
+        commitBefore: headBefore,
       });
+
+      story.status = "building";
+      await stateManager.savePlan(plan);
 
       const prompt = this.orchestrator.craftWorkerPrompt(story, "build", {
         plan,
@@ -229,36 +256,25 @@ export class Pipeline {
 
       const result = await this.worker.run("build", prompt, {
         onProgress: (event) => {
-          if (event.type === "tool_use" && event.tool === "Write") {
+          if (event.type === "tool_use") {
             spinner.text = event.content;
-          }
-          if (event.type === "tool_use" && event.tool === "Bash") {
-            spinner.text = "Running command...";
           }
         },
       });
 
       if (result.success) {
-        spinner.succeed(story.title);
         await this.git.commitAll(`feat: ${story.title}`);
         story.status = "reviewing";
-
-        if (result.filesCreated.length > 0) {
-          for (const file of result.filesCreated) {
-            console.log(chalk.dim(`       ${file}`));
-          }
-        }
+        spinner.succeed(story.title + chalk.dim(` · ${result.filesCreated.length} files`));
       } else {
-        spinner.fail(story.title);
         story.status = "blocked";
+        spinner.fail(story.title);
         for (const error of result.errors) {
           console.log(chalk.red(`       ${error}`));
         }
       }
 
       await stateManager.savePlan(plan);
-
-      // Process any queued changes between stories
       await this.processQueue(plan);
     }
 
@@ -280,24 +296,25 @@ export class Pipeline {
     for (const story of reviewableStories) {
       const spinner = ora({ text: story.title, indent: 4 }).start();
 
-      await this.git.checkout(story.branch!);
-
       const prompt = this.orchestrator.craftWorkerPrompt(story, "review", {
         plan,
         designMeta: story.designApproved ? { storyId: story.id } : undefined,
       });
 
-      const result = await this.worker.run("review", prompt);
+      let result;
+      try {
+        result = await this.worker.run("review", prompt);
+      } catch (err) {
+        spinner.fail(story.title + chalk.dim(" — review error"));
+        console.log(chalk.red(`       ${err instanceof Error ? err.message : err}`));
+        continue;
+      }
 
       if (result.success) {
-        await this.git.checkout("main");
-        await this.git.merge(story.branch!);
-
         const tagName = `forge/v0.${this.getNextTagNumber()}-${story.id}`;
         await this.git.tag(tagName);
         story.tags.push(tagName);
         story.status = "done";
-
         spinner.succeed(story.title + chalk.dim(` [${tagName}]`));
       } else {
         spinner.fail(story.title);
@@ -307,7 +324,6 @@ export class Pipeline {
       await stateManager.savePlan(plan);
     }
 
-    await this.git.checkout("main");
     await stateManager.updatePhase("review");
     console.log(chalk.dim("\n  Review phase complete\n"));
   }
@@ -333,10 +349,9 @@ export class Pipeline {
       if (decision.action === "route-to-worker" && decision.prompt) {
         const mode = decision.workerMode || "fix";
         const spinner = ora({ text: change.message, indent: 4 }).start();
-
         const result = await this.worker.run(mode, decision.prompt);
-
         if (result.success) {
+          await this.git.commitAll(`fix: ${change.message}`);
           spinner.succeed(change.message);
         } else {
           spinner.fail(change.message);

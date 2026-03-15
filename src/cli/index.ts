@@ -12,6 +12,12 @@ import { statusCommand } from "./commands/status.js";
 import { fixCommand } from "./commands/fix.js";
 import { undoCommand } from "./commands/undo.js";
 import { autoCommand } from "./commands/auto.js";
+import { resumeCommand } from "./commands/resume.js";
+import { mapCommand } from "./commands/map.js";
+import { diffCommand } from "./commands/diff.js";
+import { doctorCommand } from "./commands/doctor.js";
+import { cleanCommand } from "./commands/clean.js";
+import { exportCommand } from "./commands/export.js";
 import { historyCommand, checkoutCommand } from "./commands/history.js";
 
 const program = new Command();
@@ -23,9 +29,36 @@ program
       " — AI Development Orchestration Framework\n" +
       "  Structured multi-agent pipeline: plan → design → build → review"
   )
-  .version("0.2.0");
+  .version("1.0.0");
 
-// ── Commands ──────────────────────────────────────────────
+// ── Pipeline Commands ────────────────────────────────────
+
+program
+  .command("auto [description]")
+  .description("Fully autonomous mode — plan, build, and review in one command")
+  .option("--no-sandbox", "Disable sandbox (not recommended)")
+  .option("-q, --quiet", "Hide live agent output, show spinners only")
+  .option("--allow-network <domains>", "Comma-separated allowed network domains")
+  .option("--mute", "Suppress notification sounds")
+  .option("--deploy", "Configure GitHub Pages deployment after build")
+  .option("--skip-design", "Skip design phase (faster, no Storybook previews)")
+  .action(autoCommand);
+
+program
+  .command("resume")
+  .description("Resume an interrupted sprint from where it left off")
+  .option("--no-sandbox", "Disable sandbox")
+  .option("-q, --quiet", "Spinners only")
+  .option("--mute", "Suppress sounds")
+  .option("--skip-design", "Skip design phase")
+  .action(resumeCommand);
+
+program
+  .command("sprint [description]")
+  .description("Run full pipeline with human gates between phases")
+  .action(sprintCommand);
+
+// ── Step-by-Step Commands ────────────────────────────────
 
 program
   .command("init")
@@ -59,15 +92,22 @@ program
   .option("-s, --story <storyId>", "Review a specific story only")
   .action(reviewCommand);
 
-program
-  .command("sprint [description]")
-  .description("Run the full pipeline: plan → design → build → review")
-  .action(sprintCommand);
+// ── Utilities ────────────────────────────────────────────
 
 program
   .command("status")
   .description("Show current sprint state and progress")
   .action(statusCommand);
+
+program
+  .command("map")
+  .description("Visual sprint map with story status and dependencies")
+  .action(mapCommand);
+
+program
+  .command("diff <v1> [v2]")
+  .description("Show changes between two versions or tags")
+  .action(diffCommand);
 
 program
   .command("fix <description>")
@@ -81,17 +121,6 @@ program
   .action(undoCommand);
 
 program
-  .command("auto [description]")
-  .description("Fully autonomous mode — Lead Agent runs the entire sprint")
-  .option("--no-sandbox", "Disable sandbox (not recommended)")
-  .option("-q, --quiet", "Hide live agent output, show spinners only")
-  .option("--allow-network <domains>", "Comma-separated allowed network domains")
-  .option("--mute", "Suppress notification sounds")
-  .option("--deploy", "Configure GitHub Pages deployment after build")
-  .option("--skip-design", "Skip design phase (faster, no Storybook previews)")
-  .action(autoCommand);
-
-program
   .command("history")
   .description("Show version timeline, checkpoints, and activity log")
   .action(historyCommand);
@@ -100,6 +129,24 @@ program
   .command("checkout <version>")
   .description("Jump to a specific version or checkpoint")
   .action(checkoutCommand);
+
+program
+  .command("export")
+  .description("Export sprint plan as markdown")
+  .option("-o, --output <path>", "Output file path", "sprint-plan.md")
+  .action(exportCommand);
+
+program
+  .command("clean")
+  .description("Reset sprint state (keeps config)")
+  .option("-f, --force", "Skip confirmation prompt")
+  .option("--snapshots", "Only clean snapshots")
+  .action(cleanCommand);
+
+program
+  .command("doctor")
+  .description("Diagnose setup issues and check system requirements")
+  .action(doctorCommand);
 
 // ── Parse ─────────────────────────────────────────────────
 

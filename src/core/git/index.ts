@@ -10,6 +10,8 @@ import path from "path";
 export class GitManager {
   private git: SimpleGit;
   private basePath: string;
+  private cachedBranch: string | null = null;
+  private repoVerified = false;
 
   constructor(basePath: string = process.cwd()) {
     this.basePath = basePath;
@@ -32,6 +34,7 @@ export class GitManager {
   async checkout(branch: string): Promise<void> {
     await this.stashDirtyState();
     await this.git.checkout(branch);
+    this.cachedBranch = branch;
   }
 
   async merge(branch: string): Promise<void> {
@@ -43,8 +46,10 @@ export class GitManager {
   }
 
   async getCurrentBranch(): Promise<string> {
+    if (this.cachedBranch) return this.cachedBranch;
     const status = await this.git.status();
-    return status.current || "main";
+    this.cachedBranch = status.current || "main";
+    return this.cachedBranch;
   }
 
   async listBranches(): Promise<string[]> {
@@ -55,10 +60,13 @@ export class GitManager {
   // ── Commit Operations ─────────────────────────────────────
 
   async commitAll(message: string): Promise<void> {
+    // Use git add + commit in one flow; skip status check — let commit fail silently if nothing staged
     await this.git.add(".");
-    const status = await this.git.status();
-    if (status.staged.length > 0) {
+    try {
       await this.git.commit(message);
+    } catch (err: any) {
+      // "nothing to commit" is not an error
+      if (!err?.message?.includes("nothing to commit")) throw err;
     }
   }
 
@@ -92,6 +100,11 @@ export class GitManager {
 
   async getDiff(branch: string): Promise<string> {
     return this.git.diff(["main", branch]);
+  }
+
+  /** Diff between any two refs (tags, commits, branches) */
+  async getDiff2(ref1: string, ref2: string): Promise<string> {
+    return this.git.diff([ref1, ref2]);
   }
 
   async getLog(count: number = 10): Promise<any[]> {
@@ -145,6 +158,8 @@ export class GitManager {
   // ── Init (for new projects) ───────────────────────────────
 
   async ensureRepo(): Promise<void> {
+    if (this.repoVerified) return;
+
     const isRepo = await this.git.checkIsRepo();
     if (!isRepo) {
       await this.git.init();
@@ -158,12 +173,19 @@ export class GitManager {
       await this.git.add(".");
       await this.git.commit("Initial commit");
     }
+
+    this.repoVerified = true;
   }
 
   async ensureMainBranch(): Promise<void> {
-    const branches = await this.listBranches();
-    if (!branches.includes("main")) {
-      await this.git.branch(["-M", "main"]);
+    const current = await this.getCurrentBranch();
+    if (current !== "main") {
+      // Only check branches if we're not already on main
+      const branches = await this.listBranches();
+      if (!branches.includes("main")) {
+        await this.git.branch(["-M", "main"]);
+        this.cachedBranch = "main";
+      }
     }
   }
 

@@ -21,9 +21,17 @@ const SNAPSHOTS_DIR = "snapshots";
 
 class StateManager {
   private basePath: string;
+  private cache: Map<string, { data: any; mtime: number }> = new Map();
+  private dirCreated: Set<string> = new Set();
 
   constructor(basePath: string = process.cwd()) {
     this.basePath = basePath;
+  }
+
+  /** Clear all caches (call when basePath changes) */
+  clearCache(): void {
+    this.cache.clear();
+    this.dirCreated.clear();
   }
 
   // ── Paths ─────────────────────────────────────────────────
@@ -187,8 +195,19 @@ class StateManager {
 
   private async readJson<T>(filePath: string): Promise<T | null> {
     try {
+      const stat = await fs.stat(filePath);
+      const mtime = stat.mtimeMs;
+
+      // Return cached if file hasn't changed
+      const cached = this.cache.get(filePath);
+      if (cached && cached.mtime === mtime) {
+        return cached.data as T;
+      }
+
       const content = await fs.readFile(filePath, "utf-8");
-      return JSON.parse(content) as T;
+      const data = JSON.parse(content) as T;
+      this.cache.set(filePath, { data, mtime });
+      return data;
     } catch {
       return null;
     }
@@ -196,8 +215,16 @@ class StateManager {
 
   private async writeJson(filePath: string, data: any): Promise<void> {
     const dir = path.dirname(filePath);
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+    // Only mkdir if we haven't already created this directory
+    if (!this.dirCreated.has(dir)) {
+      await fs.mkdir(dir, { recursive: true });
+      this.dirCreated.add(dir);
+    }
+    const json = JSON.stringify(data, null, 2);
+    await fs.writeFile(filePath, json);
+    // Update cache immediately — avoid re-reading what we just wrote
+    const stat = await fs.stat(filePath);
+    this.cache.set(filePath, { data, mtime: stat.mtimeMs });
   }
 
   private async fileExists(filePath: string): Promise<boolean> {

@@ -1,5 +1,6 @@
 // ============================================================
 // forge fix "description" — Fix a bug or make a small change
+// Works on main. No branch switching.
 // ============================================================
 
 import chalk from "chalk";
@@ -16,71 +17,67 @@ export async function fixCommand(description: string) {
     return;
   }
 
-  console.log(chalk.bold("\n🔧 Forge Fix\n"));
+  if (!description || description.trim().length === 0) {
+    console.log(chalk.red("\n  Please describe the fix: forge fix \"description\"\n"));
+    return;
+  }
+
+  console.log(chalk.bold("\n  forge fix\n"));
   console.log(chalk.dim(`  "${description}"\n`));
 
   const orchestrator = new Orchestrator(config);
-  const worker = new Worker(config);
+  const worker = new Worker(config, {});
   const git = new GitManager();
   const state = await stateManager.getState();
 
   // ── Orchestrator classifies the request ─────────────────
-  const spinner = ora("  Orchestrator analyzing request...").start();
+  const spinner = ora({ text: "Analyzing request...", indent: 2 }).start();
 
-  const decision = await orchestrator.routeUserInput(description, state);
+  let decision;
+  try {
+    decision = await orchestrator.routeUserInput(description, state);
+  } catch (err) {
+    spinner.fail("Failed to analyze request");
+    console.log(chalk.red(`  ${err instanceof Error ? err.message : err}`));
+    return;
+  }
 
   switch (decision.action) {
     case "route-to-worker": {
       const mode = decision.workerMode || "fix";
-      spinner.text = `  Routing to Worker (${mode} mode)...`;
+      spinner.text = `Worker (${mode}) applying fix...`;
 
-      // Take snapshot before fixing
+      // Snapshot before fixing
+      const headBefore = await git.getHead();
       await stateManager.saveSnapshot({
         action: "fix",
         storyId: state.currentStory,
-        branch: await git.getCurrentBranch(),
+        branch: "main",
+        commitBefore: headBefore,
       });
-
-      // Create a fix branch
-      const branchName = `fix/${Date.now()}`;
-      await git.createBranch(branchName);
-
-      spinner.text = `  Worker (${mode}) applying fix...`;
 
       const result = await worker.run(mode, decision.prompt || description, {
         onProgress: (event) => {
           if (event.type === "tool_use") {
-            spinner.text = `  ${event.content}`;
+            spinner.text = event.content;
           }
         },
       });
 
       if (result.success) {
-        spinner.succeed("  Fix applied successfully");
-
-        // Commit and merge
         await git.commitAll(`fix: ${description}`);
-        await git.checkout("main");
-        await git.merge(branchName);
-        await git.deleteBranch(branchName);
+        spinner.succeed("Fix applied");
 
-        if (result.filesModified.length > 0) {
-          for (const file of result.filesModified) {
-            console.log(chalk.dim(`    └── Modified: ${file}`));
-          }
+        for (const file of result.filesModified) {
+          console.log(chalk.dim(`    modified: ${file}`));
         }
-        if (result.filesCreated.length > 0) {
-          for (const file of result.filesCreated) {
-            console.log(chalk.dim(`    └── Created: ${file}`));
-          }
+        for (const file of result.filesCreated) {
+          console.log(chalk.dim(`    created: ${file}`));
         }
       } else {
-        spinner.fail("  Fix failed");
-        // Rollback
-        await git.checkout("main");
-        await git.deleteBranch(branchName);
+        spinner.fail("Fix failed");
         for (const error of result.errors) {
-          console.log(chalk.red(`    └── ${error}`));
+          console.log(chalk.red(`    ${error}`));
         }
       }
 
@@ -93,36 +90,50 @@ export async function fixCommand(description: string) {
     }
 
     case "add-story": {
-      spinner.succeed("  New feature detected — adding to sprint plan");
-      console.log(
-        chalk.cyan(
-          `\n  📝 Added story: ${decision.story?.title || description}`
-        )
-      );
-      console.log(
-        chalk.dim("  This will be built in the next sprint cycle.\n")
-      );
+      spinner.succeed("New feature detected");
 
-      // TODO: Actually add to plan.json
+      const plan = await stateManager.getPlan();
+      if (plan && plan.epics.length > 0) {
+        const newStory = {
+          id: `story-${Date.now()}`,
+          title: decision.story?.title || description,
+          description: decision.story?.description || description,
+          type: (decision.story?.type as any) || "fullstack",
+          status: "planned" as const,
+          branch: null,
+          designApproved: false,
+          tags: [],
+          priority: 99,
+          dependencies: [],
+        };
+
+        // Add to last epic
+        plan.epics[plan.epics.length - 1].stories.push(newStory);
+        await stateManager.savePlan(plan);
+        await git.commitAll(`forge: add story "${newStory.title}"`);
+
+        console.log(chalk.green(`  Added: ${newStory.title}`));
+        console.log(chalk.dim(`  Run ${chalk.white("forge build")} or ${chalk.white("forge auto")} to build it.\n`));
+      } else {
+        console.log(chalk.yellow("  No plan found. Run forge plan first to create a sprint plan.\n"));
+      }
       break;
     }
 
     case "answer": {
       spinner.stop();
-      console.log(chalk.white(`  ${decision.response}\n`));
+      console.log(`  ${decision.response}\n`);
       break;
     }
 
     case "queue-change": {
-      spinner.succeed("  Change queued (Worker is busy)");
-      console.log(
-        chalk.dim("  Will apply after the current task completes.\n")
-      );
+      spinner.succeed("Change queued (Worker is busy)");
+      console.log(chalk.dim("  Will apply after the current task completes.\n"));
       break;
     }
 
     default: {
-      spinner.fail("  Could not process request");
+      spinner.fail("Could not process request");
       break;
     }
   }

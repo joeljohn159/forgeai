@@ -76,7 +76,7 @@ export interface SprintState {
 // ============================================================
 
 export interface ForgeConfig {
-  framework: "nextjs" | "react" | "django" | "flutter";
+  framework: string; // "nextjs" | "react" | "django" — extensible via adapters
   model: "sonnet" | "opus" | "haiku";
   designPreview: "storybook" | "html";
   githubSync: boolean;

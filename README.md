@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/npm/v/forgeai?style=flat-square&color=000" alt="npm version" />
   <img src="https://img.shields.io/badge/node-%3E%3D18-000?style=flat-square" alt="node version" />
   <img src="https://img.shields.io/github/license/joeljohn159/forgeai?style=flat-square&color=000" alt="license" />
-  <img src="https://img.shields.io/badge/framework-Next.js-000?style=flat-square" alt="framework" />
+  <img src="https://img.shields.io/badge/frameworks-Next.js%20%7C%20React%20%7C%20Django-000?style=flat-square" alt="frameworks" />
 </p>
 
 <h1 align="center">ForgeAI</h1>
@@ -101,14 +101,17 @@ npm install -g forgeai
 # Create a new project directory
 mkdir my-app && cd my-app
 
-# Initialize
+# Initialize (choose Next.js, React+Vite, or Django)
 forge init
 
 # Build something
 forge auto "a task management app with projects, due dates, and team assignment"
+
+# If interrupted, resume where you left off
+forge resume
 ```
 
-That's it. Come back in 15 minutes to a working Next.js app with proper TypeScript, Tailwind CSS, responsive design, SEO metadata, favicons, and a README.
+That's it. Come back in 15 minutes to a working app with proper types, responsive design, SEO metadata, favicons, and a README. Works with Next.js, React + Vite, or Django.
 
 <br/>
 
@@ -152,6 +155,21 @@ Every project gets the things most AI tools forget:
 - `next/image` for all images
 - Auto-generated `README.md` based on what was actually built
 
+### Multi-Framework Support
+ForgeAI isn't locked to one framework. Each adapter knows how to scaffold, build, lint, and run a project in its stack:
+
+| Framework | Language | Design Phase | Status |
+|-----------|----------|-------------|--------|
+| **Next.js** | TypeScript | Storybook | Stable |
+| **React + Vite** | TypeScript | Storybook | Stable |
+| **Django** | Python | Skipped | Stable |
+| Flutter | Dart | — | Planned |
+
+Worker prompts automatically adapt to the framework — Next.js gets App Router instructions, Vite gets SPA routing, Django gets migration commands.
+
+### Sprint Resume
+If a build gets interrupted (auth expires, network drops, you close the terminal), your progress is saved. Run `forge resume` to pick up exactly where you left off. Blocked stories can be retried.
+
 ### Optional GitHub Pages Deploy
 Pass `--deploy` and ForgeAI configures `next.config` for static export and creates a GitHub Actions workflow for automatic deployment.
 
@@ -184,8 +202,16 @@ forge sprint "description"            # Run full pipeline with human gates
 
 ```bash
 forge status                          # Show current sprint progress
+forge map                             # Visual sprint map with status + dependencies
+forge diff <v1> [v2]                  # Show changes between two versions
 forge fix "description"               # Fix a bug or make a small change
 forge undo                            # Revert the last agent action
+forge resume                          # Resume an interrupted sprint
+forge history                         # Show version timeline and activity log
+forge checkout <version>              # Jump to a specific version or checkpoint
+forge export                          # Export sprint plan as markdown
+forge clean                           # Reset sprint state (keeps config)
+forge doctor                          # Diagnose setup issues
 ```
 
 <br/>
@@ -198,6 +224,7 @@ src/
 │   ├── index.ts                      # CLI entry point (commander)
 │   └── commands/
 │       ├── auto.ts                   # forge auto — autonomous mode
+│       ├── resume.ts                 # forge resume — resume interrupted sprint
 │       ├── init.ts                   # forge init
 │       ├── plan.ts                   # forge plan
 │       ├── design.ts                 # forge design
@@ -205,8 +232,10 @@ src/
 │       ├── review.ts                 # forge review
 │       ├── sprint.ts                 # forge sprint
 │       ├── status.ts                 # forge status
+│       ├── map.ts                    # forge map — visual sprint map
 │       ├── fix.ts                    # forge fix
-│       └── undo.ts                   # forge undo
+│       ├── undo.ts                   # forge undo
+│       └── history.ts               # forge history + forge checkout
 │
 ├── core/
 │   ├── orchestrator/
@@ -216,20 +245,30 @@ src/
 │   ├── worker/
 │   │   ├── index.ts                  # Worker agent — executes in 4 modes
 │   │   └── prompts/
-│   │       └── index.ts              # Mode-specific system prompts
+│   │       └── index.ts              # Framework-aware mode-specific prompts
 │   │
 │   ├── pipeline/
 │   │   ├── index.ts                  # Step-by-step pipeline
-│   │   └── auto.ts                   # Autonomous pipeline (parallel, timer, gates)
+│   │   └── auto.ts                   # Autonomous pipeline (parallel, timer, gates, resume)
+│   │
+│   ├── adapters/
+│   │   ├── base.ts                   # FrameworkAdapter interface
+│   │   ├── nextjs.ts                 # Next.js adapter
+│   │   ├── react-vite.ts             # React + Vite adapter
+│   │   ├── django.ts                 # Django adapter
+│   │   └── index.ts                  # Adapter registry + factory
 │   │
 │   ├── git/
 │   │   └── index.ts                  # Git operations (branch, commit, tag, merge)
+│   │
+│   ├── github/
+│   │   └── index.ts                  # GitHub Issues sync (via gh CLI)
 │   │
 │   └── utils/
 │       └── sound.ts                  # Notification sounds (macOS/Linux/fallback)
 │
 ├── state/
-│   └── index.ts                      # State manager (.forge/ directory)
+│   └── index.ts                      # State manager (.forge/ directory, cached)
 │
 └── types/
     └── plan.ts                       # TypeScript types for the entire system
@@ -310,36 +349,51 @@ After `forge init`, your `forge.config.json` controls:
 | Parallelism | N/A | N/A | N/A | **Dependency-grouped parallel** |
 | Human oversight | Full control | None | Approve/reject | **Stage gates + live feedback** |
 | SEO & assets | You remember | You remember | You remember | **Built-in defaults** |
+| Multi-framework | N/A | Any | Any | **Next.js, React, Django** |
+| Resume on failure | Start over | N/A | N/A | **Auto-save + resume** |
 
 <br/>
 
 ## Roadmap
 
-**v0.1** — Current
-- Two-agent pipeline (Orchestrator + Worker)
-- Autonomous mode with parallel execution
-- Next.js support
-- Review gates, safety caps, live feedback
-- SEO, assets, README generation
-- GitHub Pages deployment
+**v0.1** — Core pipeline, two-agent architecture, Next.js support
 
-**v0.2**
-- `forge undo` with file-level rollback
-- `forge history` with version timeline
-- Design import from Figma/screenshots
-- GitHub Issues/Projects sync
+**v0.2** — Autonomous mode, parallel execution, undo/history, GitHub sync
 
-**v0.3**
-- React (Vite) adapter
-- Django adapter
-- `forge map` — Git visualization in browser
-- Web dashboard
+**v0.3** — React + Vite and Django adapters, `forge map`, `forge resume`
 
-**v1.0**
-- Multiple LLM providers
-- Plugin system for custom adapters
-- CI/CD integration
-- Team collaboration
+**v1.0** — Current
+- 18 CLI commands covering the full development lifecycle
+- 3 framework adapters (Next.js, React + Vite, Django)
+- Framework-aware prompts via pluggable adapter system
+- `forge diff`, `forge doctor`, `forge clean`, `forge export`
+- Graceful shutdown with automatic progress save
+- Config validation with actionable error messages
+- Token expiry handling with auto-retry
+- All known bugs fixed, all stubs implemented
+
+**v1.1** — Next Up
+- **Flutter adapter** — Dart support with widget-based design previews
+- **Vue.js / Nuxt adapter** — Vue 3 + Composition API + Nuxt 3 SSR support
+- **Svelte / SvelteKit adapter** — Svelte 5 with runes and SvelteKit routing
+- **Test generation phase** — auto-generate unit and integration tests after build (Vitest, pytest, Flutter test)
+- **Custom adapter plugin API** — drop a JS file in `.forge/adapters/` to add your own framework
+
+**v1.2** — Planned
+- **Multi-provider support** — swap Claude for OpenAI, Gemini, or local models (Ollama) per agent
+- **Web dashboard** — browser-based sprint monitoring with real-time build progress, token usage charts, and story diffs
+- **CI/CD integration** — GitHub Actions / GitLab CI pipeline generation, auto-run tests on PR, deploy previews
+- **Cost estimation** — token budget planning before sprint starts, per-story cost breakdown, spending alerts
+
+**v2.0** — Future
+- **Team collaboration** — multiple users can queue feedback on the same sprint, role-based permissions (lead reviews, dev builds)
+- **Monorepo support** — run separate pipelines for `packages/*` with shared dependency tracking
+- **Visual regression testing** — screenshot comparison between versions, flag UI drift automatically
+- **Database schema generation** — auto-generate migrations, seed data, and ERD diagrams from plan descriptions
+- **Accessibility audit phase** — automated WCAG checks after build, auto-fix common a11y issues
+- **i18n / localization** — generate translation keys and locale files from built UI, support RTL layouts
+- **Plugin system** — community-built pipeline phases (e.g., performance audit, API docs, Docker setup)
+- **Template library** — starter templates for common app types (SaaS dashboard, e-commerce, blog, landing page)
 
 <br/>
 

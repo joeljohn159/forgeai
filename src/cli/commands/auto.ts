@@ -1,9 +1,5 @@
 // ============================================================
 // forge auto — Fully autonomous "Lead Agent" mode
-// Runs plan > design > build > review with no human gates
-// (except a review gate after build).
-// Agent operates in a sandboxed environment for safety.
-// Users can type messages anytime — queued and handled between stories.
 // ============================================================
 
 import chalk from "chalk";
@@ -14,25 +10,19 @@ import { homedir } from "os";
 import path from "path";
 import { stateManager } from "../../state/index.js";
 import { AutoPipeline } from "../../core/pipeline/auto.js";
+import { loadAndValidateConfig } from "../../core/utils/config.js";
+import { getAdapter } from "../../core/adapters/index.js";
 
 function checkClaudeAuth(): { ok: boolean; reason: string } {
-  // Check if Claude Code CLI is installed
   try {
     execSync("which claude", { stdio: "ignore" });
   } catch {
-    return {
-      ok: false,
-      reason: "Claude Code CLI is not installed.",
-    };
+    return { ok: false, reason: "Claude Code CLI is not installed." };
   }
 
-  // Check for auth credentials directory
   const claudeDir = path.join(homedir(), ".claude");
   if (!existsSync(claudeDir)) {
-    return {
-      ok: false,
-      reason: "Claude Code is installed but not logged in.",
-    };
+    return { ok: false, reason: "Claude Code is installed but not logged in." };
   }
 
   return { ok: true, reason: "" };
@@ -49,25 +39,33 @@ export async function autoCommand(
     skipDesign?: boolean;
   }
 ) {
-  // ── Auth Check ──────────────────────────────────────────
+  // Auth check
   const auth = checkClaudeAuth();
   if (!auth.ok) {
     console.log(chalk.red(`\n  ${auth.reason}\n`));
     console.log(chalk.bold("  Forge requires Claude Code to run.\n"));
     console.log(chalk.dim("  Who can use it:"));
     console.log(chalk.dim("    Anyone with a Claude Max, Team, or Enterprise subscription.\n"));
-    console.log(chalk.dim("  Setup steps:"));
-    console.log(chalk.dim("    1. Install Claude Code:  npm install -g @anthropic-ai/claude-code"));
-    console.log(chalk.dim("    2. Log in:               claude login"));
-    console.log(chalk.dim("    3. Run Forge:            forge auto \"your app idea\"\n"));
+    console.log(chalk.dim("  Setup:"));
+    console.log(chalk.dim("    1. npm install -g @anthropic-ai/claude-code"));
+    console.log(chalk.dim("    2. claude login"));
+    console.log(chalk.dim('    3. forge auto "your app idea"\n'));
+    console.log(chalk.dim("  Diagnose: forge doctor\n"));
     return;
   }
 
-  const config = await stateManager.getConfig();
-  if (!config) {
+  // Config validation
+  const rawConfig = await stateManager.getConfig();
+  if (!rawConfig) {
     console.log(chalk.red("\n  Forge not initialized. Run: forge init\n"));
     return;
   }
+  const config = loadAndValidateConfig(rawConfig);
+  if (!config) return;
+
+  // Auto-skip design for frameworks that don't support it
+  const adapter = getAdapter(config.framework);
+  const skipDesign = options.skipDesign || !adapter.designSupport;
 
   if (!description) {
     const { desc } = await inquirer.prompt([
@@ -91,7 +89,7 @@ export async function autoCommand(
     quiet: options.quiet ?? false,
     mute: options.mute ?? false,
     deploy: options.deploy ?? false,
-    skipDesign: options.skipDesign ?? false,
+    skipDesign,
     allowedDomains,
   });
 

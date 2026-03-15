@@ -1,6 +1,6 @@
 {
   "name": "forgeai",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "AI Development Orchestration Framework — structured multi-agent pipeline for building software with human oversight",
   "type": "module",
   "main": "./dist/index.js",
@@ -31,15 +31,6 @@
     "typescript": "^5.4.0",
     "vitest": "^1.0.0"
   },
-  "peerDependencies": {
-    "@storybook/react": ">=8.0.0",
-    "next": ">=14.0.0"
-  },
-  "peerDependenciesMeta": {
-    "@storybook/react": {
-      "optional": true
-    }
-  },
   "engines": {
     "node": ">=18.0.0"
   },
@@ -47,7 +38,8 @@
     "dist/",
     "templates/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "keywords": [
     "ai",
@@ -58,7 +50,11 @@
     "agile",
     "cli",
     "automation",
-    "multi-agent"
+    "multi-agent",
+    "nextjs",
+    "react",
+    "django",
+    "pipeline"
   ],
   "license": "MIT",
   "repository": {

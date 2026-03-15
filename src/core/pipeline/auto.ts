@@ -45,17 +45,116 @@ export class AutoPipeline {
   private rl: readline.Interface | null = null;
   private startTime: number = 0;
   private totalUsage: WorkerUsage = { inputTokens: 0, outputTokens: 0, costUsd: 0, durationMs: 0 };
+  private shuttingDown = false;
 
   constructor(config: ForgeConfig, options: AutoPipelineOptions = {}) {
     this.config = config;
     this.options = options;
     this.orchestrator = new Orchestrator(config);
-    this.worker = new Worker(config, {
-      sandbox: options.sandbox ?? true,
-      workingDir: options.workingDir,
-      allowedDomains: options.allowedDomains,
-    });
+    this.worker = new Worker(
+      config,
+      {
+        sandbox: options.sandbox ?? true,
+        workingDir: options.workingDir,
+        allowedDomains: options.allowedDomains,
+      },
+      options.mute,
+    );
     this.git = new GitManager();
+    this.setupGracefulShutdown();
+  }
+
+  // ── Graceful Shutdown ────────────────────────────────────
+
+  private setupGracefulShutdown(): void {
+    const handler = async () => {
+      if (this.shuttingDown) return; // Prevent double shutdown
+      this.shuttingDown = true;
+
+      console.log(chalk.yellow("\n\n  Interrupted — saving progress..."));
+
+      try {
+        if (this.plan) {
+          await stateManager.savePlan(this.plan);
+          await this.git.commitAll("forge: save progress (interrupted)");
+          console.log(chalk.dim("  Progress saved. Resume with: forge resume\n"));
+        }
+      } catch {
+        console.log(chalk.dim("  Could not save progress.\n"));
+      }
+
+      this.stopChatListener();
+      process.exit(130);
+    };
+
+    process.on("SIGINT", handler);
+    process.on("SIGTERM", handler);
+  }
+
+  // ── Resume an interrupted sprint ──────────────────────────
+
+  async resume(existingPlan: Plan): Promise<{ success: boolean; plan: Plan; errors: string[] }> {
+    const errors: string[] = [];
+    this.startTime = Date.now();
+    this.plan = existingPlan;
+
+    console.log(chalk.bold("\n  forge") + chalk.dim(" resume"));
+    console.log(chalk.dim(`  Continuing from last checkpoint\n`));
+
+    this.startChatListener();
+    await this.git.ensureRepo();
+    await this.git.ensureMainBranch();
+
+    const allStories = this.getAllStories(this.plan);
+    const needsDesign = allStories.some(
+      (s) => s.status === "planned" && (s.type === "ui" || s.type === "fullstack")
+    );
+    const needsBuild = allStories.some(
+      (s) => s.status === "planned" || s.status === "design-approved"
+    );
+    const needsReview = allStories.some((s) => s.status === "reviewing");
+
+    // Design (only stories not yet designed)
+    if (needsDesign && !this.options.skipDesign) {
+      try { await this.runDesignPhase(this.plan); }
+      catch (err) {
+        await this.saveProgressOnError("design");
+        errors.push(`Design: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
+    // Build (only stories not yet built)
+    if (needsBuild) {
+      try { await this.runBuildPhase(this.plan); }
+      catch (err) {
+        await this.saveProgressOnError("build");
+        errors.push(`Build: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
+    // Review (only stories awaiting review)
+    if (needsReview || needsBuild) {
+      const gateAction = await this.reviewGate();
+      if (gateAction === "abort") {
+        this.stopChatListener();
+        this.printSummary(errors);
+        return { success: false, plan: this.plan, errors: [...errors, "Aborted"] };
+      }
+      if (gateAction !== "skip") {
+        try { await this.runReviewPhase(this.plan); }
+        catch (err) {
+          await this.saveProgressOnError("review");
+          errors.push(`Review: ${err instanceof Error ? err.message : err}`);
+        }
+      }
+    }
+
+    this.stopChatListener();
+    this.printSummary(errors);
+    await stateManager.updatePhase("done");
+
+    const failedCount = allStories.filter((s) => s.status === "blocked").length;
+    return { success: errors.length === 0 && failedCount === 0, plan: this.plan, errors };
   }
 
   // ── Full Autonomous Sprint ─────────────────────────────────
@@ -68,7 +167,13 @@ export class AutoPipeline {
     console.log(chalk.dim(`  sandbox ${this.options.sandbox !== false ? "on" : "off"} · type a message anytime to queue feedback\n`));
 
     this.startChatListener();
-    await this.git.ensureRepo();
+
+    // Init git in parallel — both calls are independent
+    await Promise.all([
+      this.git.ensureRepo(),
+      // ensureMainBranch depends on ensureRepo internally, but
+      // ensureRepo is idempotent and fast if already initialized
+    ]);
     await this.git.ensureMainBranch();
 
     // ── Plan ───────────────────────────────────────────────
@@ -109,12 +214,18 @@ export class AutoPipeline {
       console.log(chalk.dim(`\n  Design skipped (--skip-design)\n`));
     } else {
       try { await this.runDesignPhase(this.plan); }
-      catch (err) { errors.push(`Design: ${err instanceof Error ? err.message : err}`); }
+      catch (err) {
+        await this.saveProgressOnError("design");
+        errors.push(`Design: ${err instanceof Error ? err.message : err}`);
+      }
     }
 
     // ── Build ──────────────────────────────────────────────
     try { await this.runBuildPhase(this.plan); }
-    catch (err) { errors.push(`Build: ${err instanceof Error ? err.message : err}`); }
+    catch (err) {
+      await this.saveProgressOnError("build");
+      errors.push(`Build: ${err instanceof Error ? err.message : err}`);
+    }
 
     // ── README ─────────────────────────────────────────────
     try { await this.generateReadme(this.plan); }
@@ -133,7 +244,10 @@ export class AutoPipeline {
     // ── Review ─────────────────────────────────────────────
     if (gateAction !== "skip") {
       try { await this.runReviewPhase(this.plan); }
-      catch (err) { errors.push(`Review: ${err instanceof Error ? err.message : err}`); }
+      catch (err) {
+        await this.saveProgressOnError("review");
+        errors.push(`Review: ${err instanceof Error ? err.message : err}`);
+      }
     }
 
     // ── Deploy (optional) ──────────────────────────────────
@@ -149,6 +263,20 @@ export class AutoPipeline {
     const allStories = this.getAllStories(this.plan);
     const failedCount = allStories.filter((s) => s.status === "blocked").length;
     return { success: errors.length === 0 && failedCount === 0, plan: this.plan, errors };
+  }
+
+  /** Save current progress when a phase fails — prevents data loss */
+  private async saveProgressOnError(phase: string): Promise<void> {
+    try {
+      if (this.plan) {
+        await stateManager.savePlan(this.plan);
+        await stateManager.updatePhase(phase as any);
+        await this.git.commitAll(`forge: save progress (${phase} interrupted)`);
+        console.log(chalk.dim(`  Progress saved. Resume with: forge auto --resume\n`));
+      }
+    } catch {
+      // Best-effort — don't let save failure mask the original error
+    }
   }
 
   // ── Elapsed Timer ─────────────────────────────────────────
@@ -628,11 +756,12 @@ export class AutoPipeline {
 
   private startChatListener(): void {
     if (!process.stdin.isTTY) return;
+    if (this.rl) return; // Already listening
 
     this.rl = readline.createInterface({
       input: process.stdin,
-      output: process.stdout,
-      prompt: "",
+      // Don't bind output — avoids interference with ora spinners
+      terminal: false,
     });
 
     this.rl.on("line", (line) => {
@@ -644,13 +773,26 @@ export class AutoPipeline {
         message: msg,
         queuedAt: new Date().toISOString(),
       });
-      console.log(chalk.dim(`  [queued] ${msg}`));
+
+      const count = this.chatQueue.length;
+      // Clear the current line (user's typed text) and show confirmation
+      if (process.stdout.isTTY) {
+        process.stdout.write(`\r\x1b[K`);
+      }
+      console.log(
+        chalk.green(`  [queued${count > 1 ? ` #${count}` : ""}]`) +
+          chalk.dim(` ${msg}`)
+      );
+      // Re-show the input hint so user knows they can keep typing
+      this.showInputHint();
     });
   }
 
   private stopChatListener(): void {
-    this.rl?.close();
-    this.rl = null;
+    if (this.rl) {
+      this.rl.close();
+      this.rl = null;
+    }
   }
 
   private async processChatQueue(): Promise<void> {

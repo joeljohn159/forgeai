@@ -1,15 +1,18 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import chalk from "chalk";
 import type { WorkerMode, ForgeConfig } from "../../types/plan.js";
 import {
-  DESIGN_SYSTEM_PROMPT,
-  BUILD_SYSTEM_PROMPT,
-  REVIEW_SYSTEM_PROMPT,
-  FIX_SYSTEM_PROMPT,
+  getDesignPrompt,
+  getBuildPrompt,
+  getReviewPrompt,
+  getFixPrompt,
 } from "./prompts/index.js";
+import { playSound } from "../utils/sound.js";
 
 // ============================================================
 // Worker Agent
 // Single agent, multiple modes. Does the actual work.
+// Framework-aware prompts via adapter system.
 // ============================================================
 
 const MODE_TOOLS: Record<WorkerMode, string[]> = {
@@ -19,12 +22,14 @@ const MODE_TOOLS: Record<WorkerMode, string[]> = {
   fix: ["Read", "Write", "Edit", "Bash", "Glob", "LS", "Grep"],
 };
 
-const MODE_PROMPTS: Record<WorkerMode, string> = {
-  design: DESIGN_SYSTEM_PROMPT,
-  build: BUILD_SYSTEM_PROMPT,
-  review: REVIEW_SYSTEM_PROMPT,
-  fix: FIX_SYSTEM_PROMPT,
-};
+function getModePrompt(mode: WorkerMode, framework?: string): string {
+  switch (mode) {
+    case "design": return getDesignPrompt(framework);
+    case "build":  return getBuildPrompt(framework);
+    case "review": return getReviewPrompt(framework);
+    case "fix":    return getFixPrompt(framework);
+  }
+}
 
 const MODE_MAX_TURNS: Record<WorkerMode, number> = {
   design: 30,
@@ -42,7 +47,6 @@ export interface WorkerUsage {
 
 export interface WorkerResult {
   success: boolean;
-  messages: any[];
   filesCreated: string[];
   filesModified: string[];
   errors: string[];
@@ -67,13 +71,18 @@ export interface WorkerSandboxOptions {
   allowedDomains?: string[];
 }
 
+const MAX_AUTH_RETRIES = 3;
+const AUTH_RETRY_DELAY_MS = 30_000; // 30s between retries
+
 export class Worker {
   private config: ForgeConfig;
   private sandboxOpts: WorkerSandboxOptions;
+  private mute: boolean;
 
-  constructor(config: ForgeConfig, sandboxOpts: WorkerSandboxOptions = {}) {
+  constructor(config: ForgeConfig, sandboxOpts: WorkerSandboxOptions = {}, mute = false) {
     this.config = config;
     this.sandboxOpts = sandboxOpts;
+    this.mute = mute;
   }
 
   async run(
@@ -84,13 +93,52 @@ export class Worker {
       onProgress?: WorkerProgressCallback;
     } = {}
   ): Promise<WorkerResult> {
+    // Retry loop for auth/token errors
+    for (let attempt = 1; attempt <= MAX_AUTH_RETRIES; attempt++) {
+      const result = await this.executeQuery(mode, prompt, options);
+
+      // Check if it's a recoverable auth error
+      if (!result.success && this.isAuthError(result.errors)) {
+        if (attempt < MAX_AUTH_RETRIES) {
+          this.notifyAuthError(attempt);
+          await this.waitForReauth();
+          // Clear auth errors before retrying — keep other errors
+          result.errors = result.errors.filter((e) => !this.isAuthErrorMsg(e));
+          continue;
+        }
+        // Final attempt failed — add help text
+        result.errors.push(
+          "Authentication failed after retries. Run: claude login"
+        );
+      }
+
+      return result;
+    }
+
+    // Should never reach here, but TypeScript needs it
+    return {
+      success: false,
+      filesCreated: [],
+      filesModified: [],
+      errors: ["Max retries exceeded"],
+      summary: "",
+      usage: { inputTokens: 0, outputTokens: 0, costUsd: 0, durationMs: 0 },
+    };
+  }
+
+  private async executeQuery(
+    mode: WorkerMode,
+    prompt: string,
+    options: {
+      workingDir?: string;
+      onProgress?: WorkerProgressCallback;
+    } = {}
+  ): Promise<WorkerResult> {
     const workingDir = options.workingDir || this.sandboxOpts.workingDir || process.cwd();
     const { onProgress } = options;
 
-    const runStart = Date.now();
     const result: WorkerResult = {
       success: false,
-      messages: [],
       filesCreated: [],
       filesModified: [],
       errors: [],
@@ -100,7 +148,7 @@ export class Worker {
 
     const sdkOptions: Record<string, any> = {
       model: this.config.model,
-      systemPrompt: MODE_PROMPTS[mode],
+      systemPrompt: getModePrompt(mode, this.config.framework),
       allowedTools: MODE_TOOLS[mode],
       cwd: workingDir,
       maxTurns: MODE_MAX_TURNS[mode],
@@ -125,7 +173,6 @@ export class Worker {
 
     try {
       for await (const msg of query({ prompt, options: sdkOptions })) {
-        result.messages.push(msg);
 
         // Assistant message — contains tool_use and text blocks
         if (msg.type === "assistant") {
@@ -202,13 +249,47 @@ export class Worker {
         result.summary = "Completed without summary.";
       }
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
       result.success = false;
-      result.errors.push(
-        error instanceof Error ? error.message : String(error)
-      );
+      result.errors.push(msg);
     }
 
     return result;
+  }
+
+  // ── Auth Error Detection ──────────────────────────────────
+
+  private isAuthErrorMsg(msg: string): boolean {
+    const lower = msg.toLowerCase();
+    return (
+      lower.includes("401") ||
+      lower.includes("unauthorized") ||
+      lower.includes("auth") ||
+      lower.includes("token expired") ||
+      lower.includes("session expired") ||
+      lower.includes("not authenticated") ||
+      lower.includes("login required") ||
+      lower.includes("credential")
+    );
+  }
+
+  private isAuthError(errors: string[]): boolean {
+    return errors.some((e) => this.isAuthErrorMsg(e));
+  }
+
+  private notifyAuthError(attempt: number): void {
+    if (!this.mute) playSound();
+    console.log("");
+    console.log(chalk.yellow("  ⚠ Authentication expired"));
+    console.log(chalk.dim("  Your Claude session token has expired."));
+    console.log(chalk.dim("  Please re-authenticate:"));
+    console.log(chalk.white("    claude login"));
+    console.log(chalk.dim(`\n  Waiting to retry (attempt ${attempt}/${MAX_AUTH_RETRIES})...`));
+    console.log(chalk.dim("  Forge will resume automatically once auth is renewed.\n"));
+  }
+
+  private waitForReauth(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, AUTH_RETRY_DELAY_MS));
   }
 
   /** Turn a tool_use block into a short human-readable string */

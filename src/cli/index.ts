@@ -20,6 +20,7 @@ import { cleanCommand } from "./commands/clean.js";
 import { exportCommand } from "./commands/export.js";
 import { historyCommand, checkoutCommand } from "./commands/history.js";
 import { startCommand } from "./commands/start.js";
+import { pushCommand } from "./commands/push.js";
 
 const program = new Command();
 
@@ -97,6 +98,11 @@ program
   .command("start")
   .description("Start the dev server for the current project")
   .action(startCommand);
+
+program
+  .command("push")
+  .description("Push project to GitHub (commits + tags)")
+  .action(pushCommand);
 
 // ── Utilities ────────────────────────────────────────────
 

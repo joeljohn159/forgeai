@@ -150,6 +150,29 @@ export class GitManager {
     }
   }
 
+  // ── Push Operations ─────────────────────────────────────
+
+  /** Check if a remote named 'origin' exists */
+  async hasRemote(): Promise<boolean> {
+    try {
+      const remotes = await this.git.getRemotes();
+      return remotes.some((r) => r.name === "origin");
+    } catch {
+      return false;
+    }
+  }
+
+  /** Push current branch to origin */
+  async push(): Promise<void> {
+    const branch = await this.getCurrentBranch();
+    await this.git.push("origin", branch, ["--set-upstream"]);
+  }
+
+  /** Push tags to origin */
+  async pushTags(): Promise<void> {
+    await this.git.pushTags("origin");
+  }
+
   // ── Status ────────────────────────────────────────────────
 
   async isClean(): Promise<boolean> {

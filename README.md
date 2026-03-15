@@ -9,7 +9,7 @@
 
 <p align="center">
   <strong>Ship production apps from a single sentence.</strong><br/>
-  An AI orchestration framework that plans, designs, builds, and reviews software<br/>using a structured multi-agent pipeline — not a chat window.
+  An AI orchestration framework that plans, designs, builds, reviews, and deploys software<br/>using a structured multi-agent pipeline — not a chat window.
 </p>
 
 <br/>
@@ -51,6 +51,7 @@ $ forge auto "a personal finance tracker with budget categories, expense logging
   [2:01] [4/12] Category management page · 3 files            1.2k in / 9.8k out
   ...
 
+  [14:02] Pushed to GitHub
   ─────────────────────────────────
   Done in 14m 23s · 12/12 stories
   28.4k in / 198.2k out
@@ -72,21 +73,21 @@ ForgeAI replaces that entire loop.
 
 ## How It Works
 
-ForgeAI runs a complete software development pipeline autonomously. One command, five phases, zero copy-pasting.
+ForgeAI runs a complete software development pipeline autonomously. One command, six phases, zero copy-pasting.
 
 ```
- PLAN            DESIGN           BUILD            REVIEW           SHIP
- ────            ──────           ─────            ──────           ────
- Break into      Generate         Implement        QA check         Tag, merge,
- epics &         Storybook        each story       each story,      deploy
- stories         previews         with full        auto-fix
-                                  CLI power        minor issues
+ PLAN            DESIGN           BUILD            REVIEW           PUSH            SHIP
+ ────            ──────           ─────            ──────           ────            ────
+ Break into      Generate         Implement        QA check         Auto-push       Tag, merge,
+ epics &         Storybook        each story       each story,      commits &       deploy
+ stories         previews         with full        auto-fix         tags to
+                                  CLI power        minor issues     GitHub
 
- Orchestrator    Worker           Worker           Worker           Git
- Agent           (design mode)    (build mode)     (review mode)    Manager
+ Orchestrator    Worker           Worker           Worker           Git             Git
+ Agent           (design mode)    (build mode)     (review mode)    Manager         Manager
 ```
 
-Each phase has a clear input, a clear output, and a gate between them. Stories that don't depend on each other build **in parallel**. The whole thing runs on `main` with per-story commits and tags for easy rollback.
+Each phase has a clear input, a clear output, and a gate between them. Stories that don't depend on each other build **in parallel**. After everything completes, the project is **automatically pushed to GitHub** (if a remote is configured). The whole thing runs on `main` with per-story commits and tags for easy rollback.
 
 <br/>
 
@@ -107,18 +108,27 @@ forge init
 # Build something
 forge auto "a task management app with projects, due dates, and team assignment"
 
+# Start the dev server
+forge start
+
 # If interrupted, resume where you left off
 forge resume
+
+# Fix a bug (supports screenshots)
+forge fix "the sidebar overlaps on mobile" --image screenshot.png
+
+# Push to GitHub manually (auto-push happens after forge auto)
+forge push
 ```
 
-That's it. Come back in 15 minutes to a working app with proper types, responsive design, SEO metadata, favicons, and a README. Works with Next.js, React + Vite, or Django.
+That's it. Come back in 15 minutes to a working app with proper types, responsive design, SEO metadata, favicons, and a README — already pushed to your repo.
 
 <br/>
 
 ## Features
 
 ### Structured Pipeline, Not a Chat
-Every project goes through Plan, Design, Build, Review. Each phase has specialized prompts, tool permissions, and quality gates. The AI doesn't just write code — it writes code that builds, lints, and type-checks before moving on.
+Every project goes through Plan, Design, Build, Review, Push. Each phase has specialized prompts, tool permissions, and quality gates. The AI doesn't just write code — it writes code that builds, lints, and type-checks before moving on.
 
 ### Two-Agent Architecture
 Instead of one monolithic agent or a swarm of disconnected ones, ForgeAI uses two:
@@ -139,6 +149,16 @@ Type a message at any point during the build. It gets queued and processed at th
 "add a dark mode toggle"              → New story added to sprint
 "what's the database schema?"         → Orchestrator answers directly
 ```
+
+### Screenshot-Based Bug Fixing
+Pass a screenshot to `forge fix` and Claude reads the image to understand the visual issue:
+
+```bash
+forge fix "the button is cut off on mobile" --image screenshot.png
+```
+
+### Auto-Push to GitHub
+After `forge auto` or `forge resume` completes, commits and tags are automatically pushed to your GitHub remote. No manual `git push` needed. If the push fails, a warning is shown and you can retry with `forge push`.
 
 ### Safety Caps
 Each worker mode has a maximum turn limit (`design: 30`, `build: 50`, `review: 20`, `fix: 15`). If an agent gets stuck in a loop, it stops gracefully instead of burning through your usage.
@@ -180,7 +200,7 @@ Pass `--deploy` and ForgeAI configures `next.config` for static export and creat
 ### Autonomous Mode (recommended)
 
 ```bash
-forge auto "description"              # Full autonomous pipeline
+forge auto "description"              # Full autonomous pipeline (auto-pushes to GitHub)
 forge auto "description" --skip-design  # Skip Storybook previews (faster)
 forge auto "description" --deploy     # Add GitHub Pages deployment
 forge auto "description" --mute       # No notification sounds
@@ -198,6 +218,13 @@ forge review                          # Run QA review on built stories
 forge sprint "description"            # Run full pipeline with human gates
 ```
 
+### Run & Deploy
+
+```bash
+forge start                           # Start the dev server (auto-detects framework)
+forge push                            # Push commits + tags to GitHub
+```
+
 ### Utilities
 
 ```bash
@@ -205,8 +232,9 @@ forge status                          # Show current sprint progress
 forge map                             # Visual sprint map with status + dependencies
 forge diff <v1> [v2]                  # Show changes between two versions
 forge fix "description"               # Fix a bug or make a small change
+forge fix "desc" --image <path>       # Fix with a screenshot for visual context
 forge undo                            # Revert the last agent action
-forge resume                          # Resume an interrupted sprint
+forge resume                          # Resume an interrupted sprint (auto-pushes)
 forge history                         # Show version timeline and activity log
 forge checkout <version>              # Jump to a specific version or checkpoint
 forge export                          # Export sprint plan as markdown
@@ -225,6 +253,8 @@ src/
 │   └── commands/
 │       ├── auto.ts                   # forge auto — autonomous mode
 │       ├── resume.ts                 # forge resume — resume interrupted sprint
+│       ├── start.ts                  # forge start — start dev server
+│       ├── push.ts                   # forge push — push to GitHub
 │       ├── init.ts                   # forge init
 │       ├── plan.ts                   # forge plan
 │       ├── design.ts                 # forge design
@@ -233,7 +263,7 @@ src/
 │       ├── sprint.ts                 # forge sprint
 │       ├── status.ts                 # forge status
 │       ├── map.ts                    # forge map — visual sprint map
-│       ├── fix.ts                    # forge fix
+│       ├── fix.ts                    # forge fix (supports --image)
 │       ├── undo.ts                   # forge undo
 │       └── history.ts               # forge history + forge checkout
 │
@@ -249,7 +279,7 @@ src/
 │   │
 │   ├── pipeline/
 │   │   ├── index.ts                  # Step-by-step pipeline
-│   │   └── auto.ts                   # Autonomous pipeline (parallel, timer, gates, resume)
+│   │   └── auto.ts                   # Autonomous pipeline (parallel, timer, gates, resume, auto-push)
 │   │
 │   ├── adapters/
 │   │   ├── base.ts                   # FrameworkAdapter interface
@@ -259,12 +289,13 @@ src/
 │   │   └── index.ts                  # Adapter registry + factory
 │   │
 │   ├── git/
-│   │   └── index.ts                  # Git operations (branch, commit, tag, merge)
+│   │   └── index.ts                  # Git operations (branch, commit, tag, push)
 │   │
 │   ├── github/
 │   │   └── index.ts                  # GitHub Issues sync (via gh CLI)
 │   │
 │   └── utils/
+│       ├── config.ts                 # Config validation
 │       └── sound.ts                  # Notification sounds (macOS/Linux/fallback)
 │
 ├── state/
@@ -292,7 +323,7 @@ ForgeAI tracks everything in a `.forge/` directory inside your repo:
 Every story gets a commit. Every milestone gets a tag:
 
 ```
-main ────●────●────●────●────●────●──── HEAD
+main ────●────●────●────●────●────●──── HEAD → pushed to origin
          │    │    │    │    │    │
          │    │    │    │    │    └── forge/v0.6-export-csv
          │    │    │    │    └── forge/v0.5-budget-alerts
@@ -345,9 +376,10 @@ After `forge init`, your `forge.config.json` controls:
 | Design preview | None | None | None | **Storybook generation** |
 | Build | Copy-paste | Autocomplete | Inline edit | **Full autonomous build** |
 | Review | Manual | None | None | **Automated QA + auto-fix** |
-| Git strategy | Manual | Manual | Manual | **Automated commits + tags** |
+| Git strategy | Manual | Manual | Manual | **Auto commits + tags + push** |
 | Parallelism | N/A | N/A | N/A | **Dependency-grouped parallel** |
 | Human oversight | Full control | None | Approve/reject | **Stage gates + live feedback** |
+| Bug fix with screenshots | N/A | N/A | N/A | **forge fix --image** |
 | SEO & assets | You remember | You remember | You remember | **Built-in defaults** |
 | Multi-framework | N/A | Any | Any | **Next.js, React, Django** |
 | Resume on failure | Start over | N/A | N/A | **Auto-save + resume** |
@@ -363,14 +395,16 @@ After `forge init`, your `forge.config.json` controls:
 **v0.3** — React + Vite and Django adapters, `forge map`, `forge resume`
 
 **v1.0** — Current
-- 18 CLI commands covering the full development lifecycle
+- 21 CLI commands covering the full development lifecycle
 - 3 framework adapters (Next.js, React + Vite, Django)
 - Framework-aware prompts via pluggable adapter system
-- `forge diff`, `forge doctor`, `forge clean`, `forge export`
+- `forge start` — auto-detect and launch dev server
+- `forge push` — push commits + tags to GitHub
+- `forge fix --image` — screenshot-based bug fixing
+- Auto-push to GitHub after `forge auto` and `forge resume`
 - Graceful shutdown with automatic progress save
 - Config validation with actionable error messages
 - Token expiry handling with auto-retry
-- All known bugs fixed, all stubs implemented
 
 **v1.1** — Next Up
 - **Flutter adapter** — Dart support with widget-based design previews

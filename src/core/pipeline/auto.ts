@@ -162,6 +162,9 @@ export class AutoPipeline {
       }
     }
 
+    // Auto-push on resume too
+    await this.autoPush();
+
     this.stopChatListener();
     this.printSummary(errors);
     await stateManager.updatePhase("done");
@@ -265,6 +268,9 @@ export class AutoPipeline {
       try { await this.runDeployPhase(this.plan); }
       catch (err) { errors.push(`Deploy: ${err instanceof Error ? err.message : err}`); }
     }
+
+    // ── Auto-push to GitHub ───────────────────────────────
+    await this.autoPush();
 
     this.stopChatListener();
     this.printSummary(errors);
@@ -1016,6 +1022,26 @@ export class AutoPipeline {
       }
     } catch {
       // Silently skip — GitHub sync is best-effort
+    }
+  }
+
+  // ── Auto-Push ───────────────────────────────────────────
+
+  private async autoPush(): Promise<void> {
+    const hasRemote = await this.git.hasRemote();
+    if (!hasRemote) return; // No remote configured — skip silently
+
+    const spinner = ora({ text: `${this.elapsed()} Pushing to GitHub...`, indent: 2 }).start();
+    this.activeSpinner = spinner;
+
+    try {
+      await this.git.push();
+      await this.git.pushTags();
+      spinner.succeed(`${this.elapsed()} Pushed to GitHub`);
+    } catch {
+      spinner.warn(`${this.elapsed()} Push failed` + chalk.dim(" — run forge push to retry"));
+    } finally {
+      this.activeSpinner = null;
     }
   }
 

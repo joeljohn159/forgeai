@@ -30,6 +30,7 @@ export interface AutoPipelineOptions {
   quiet?: boolean;
   mute?: boolean;
   deploy?: boolean;
+  skipDesign?: boolean;
 }
 
 export class AutoPipeline {
@@ -93,8 +94,19 @@ export class AutoPipeline {
     this.showInputHint();
 
     // ── Design ─────────────────────────────────────────────
-    try { await this.runDesignPhase(this.plan); }
-    catch (err) { errors.push(`Design: ${err instanceof Error ? err.message : err}`); }
+    if (this.options.skipDesign) {
+      // Mark all UI stories as design-approved so build can proceed
+      for (const story of this.getAllStories(this.plan)) {
+        if (story.status === "planned") {
+          story.designApproved = false;
+          story.status = "planned";
+        }
+      }
+      console.log(chalk.dim(`\n  Design skipped (--skip-design)\n`));
+    } else {
+      try { await this.runDesignPhase(this.plan); }
+      catch (err) { errors.push(`Design: ${err instanceof Error ? err.message : err}`); }
+    }
 
     // ── Build ──────────────────────────────────────────────
     try { await this.runBuildPhase(this.plan); }
@@ -341,18 +353,6 @@ export class AutoPipeline {
     const progress = this.makeProgress(spinner, label);
 
     try {
-      if (!parallel) {
-        const branchName = `feature/${story.id}`;
-        await this.git.createBranch(branchName);
-        story.branch = branchName;
-
-        await stateManager.saveSnapshot({
-          action: "build",
-          storyId: story.id,
-          branch: branchName,
-        });
-      }
-
       story.status = "building";
 
       const prompt = this.orchestrator.craftWorkerPrompt(story, "build", {
@@ -496,11 +496,6 @@ export class AutoPipeline {
       const progress = this.makeProgress(spinner, label);
 
       try {
-        // Only checkout if story has its own branch
-        if (story.branch) {
-          await this.git.checkout(story.branch);
-        }
-
         const prompt = this.orchestrator.craftWorkerPrompt(story, "review", {
           plan,
           designMeta: story.designApproved ? { storyId: story.id } : undefined,
@@ -516,10 +511,6 @@ export class AutoPipeline {
         );
 
         if (result.success) {
-          if (story.branch) {
-            await this.git.checkout("main");
-            await this.git.merge(story.branch);
-          }
           const tagName = `forge/v0.${this.tagCounter++}-${story.id}`;
           await this.git.tag(tagName);
           story.tags.push(tagName);
@@ -530,10 +521,6 @@ export class AutoPipeline {
           spinner.text = `${this.elapsed()} ${label}` + chalk.dim(" fixing issues...");
           const fixed = await this.autoFix(story, plan, result.summary, spinner, label);
           if (fixed) {
-            if (story.branch) {
-              await this.git.checkout("main");
-              await this.git.merge(story.branch);
-            }
             const tagName = `forge/v0.${this.tagCounter++}-${story.id}`;
             await this.git.tag(tagName);
             story.tags.push(tagName);
@@ -553,7 +540,6 @@ export class AutoPipeline {
       this.showInputHint();
     }
 
-    await this.git.checkout("main");
     await stateManager.updatePhase("review");
   }
 

@@ -8,8 +8,35 @@
 
 import chalk from "chalk";
 import inquirer from "inquirer";
+import { execSync } from "child_process";
+import { existsSync } from "fs";
+import { homedir } from "os";
+import path from "path";
 import { stateManager } from "../../state/index.js";
 import { AutoPipeline } from "../../core/pipeline/auto.js";
+
+function checkClaudeAuth(): { ok: boolean; reason: string } {
+  // Check if Claude Code CLI is installed
+  try {
+    execSync("which claude", { stdio: "ignore" });
+  } catch {
+    return {
+      ok: false,
+      reason: "Claude Code CLI is not installed.",
+    };
+  }
+
+  // Check for auth credentials directory
+  const claudeDir = path.join(homedir(), ".claude");
+  if (!existsSync(claudeDir)) {
+    return {
+      ok: false,
+      reason: "Claude Code is installed but not logged in.",
+    };
+  }
+
+  return { ok: true, reason: "" };
+}
 
 export async function autoCommand(
   description: string | undefined,
@@ -19,8 +46,23 @@ export async function autoCommand(
     allowNetwork?: string;
     mute?: boolean;
     deploy?: boolean;
+    skipDesign?: boolean;
   }
 ) {
+  // ── Auth Check ──────────────────────────────────────────
+  const auth = checkClaudeAuth();
+  if (!auth.ok) {
+    console.log(chalk.red(`\n  ${auth.reason}\n`));
+    console.log(chalk.bold("  Forge requires Claude Code to run.\n"));
+    console.log(chalk.dim("  Who can use it:"));
+    console.log(chalk.dim("    Anyone with a Claude Max, Team, or Enterprise subscription.\n"));
+    console.log(chalk.dim("  Setup steps:"));
+    console.log(chalk.dim("    1. Install Claude Code:  npm install -g @anthropic-ai/claude-code"));
+    console.log(chalk.dim("    2. Log in:               claude login"));
+    console.log(chalk.dim("    3. Run Forge:            forge auto \"your app idea\"\n"));
+    return;
+  }
+
   const config = await stateManager.getConfig();
   if (!config) {
     console.log(chalk.red("\n  Forge not initialized. Run: forge init\n"));
@@ -49,6 +91,7 @@ export async function autoCommand(
     quiet: options.quiet ?? false,
     mute: options.mute ?? false,
     deploy: options.deploy ?? false,
+    skipDesign: options.skipDesign ?? false,
     allowedDomains,
   });
 

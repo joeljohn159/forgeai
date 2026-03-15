@@ -87,6 +87,7 @@ program
   .option("--allow-network <domains>", "Comma-separated allowed network domains")
   .option("--mute", "Suppress notification sounds")
   .option("--deploy", "Configure GitHub Pages deployment after build")
+  .option("--skip-design", "Skip design phase (faster, no Storybook previews)")
   .action(autoCommand);
 
 program

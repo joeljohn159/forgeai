@@ -25,6 +25,8 @@ export const djangoAdapter: FrameworkAdapter = {
   designSupport: false,
   packageManager: "pip",
   requiredFiles: ["manage.py", "config/settings.py", "config/urls.py", "requirements.txt"],
+  testCommand: `${venvPython} manage.py test`,
+  testFramework: "Django TestCase",
 
   buildPromptAdditions: `
 FOR DJANGO:

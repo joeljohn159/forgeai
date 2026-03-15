@@ -4,6 +4,7 @@ import type { WorkerMode, ForgeConfig } from "../../types/plan.js";
 import {
   getDesignPrompt,
   getBuildPrompt,
+  getTestPrompt,
   getReviewPrompt,
   getFixPrompt,
 } from "./prompts/index.js";
@@ -18,6 +19,7 @@ import { playSound } from "../utils/sound.js";
 const MODE_TOOLS: Record<WorkerMode, string[]> = {
   design: ["Read", "Write", "Glob", "LS"],
   build: ["Read", "Write", "Edit", "Bash", "Glob", "LS", "Grep"],
+  test: ["Read", "Write", "Edit", "Bash", "Glob", "LS", "Grep"],
   review: ["Read", "Bash", "Glob", "LS", "Grep"],
   fix: ["Read", "Write", "Edit", "Bash", "Glob", "LS", "Grep"],
 };
@@ -26,6 +28,7 @@ function getModePrompt(mode: WorkerMode, framework?: string): string {
   switch (mode) {
     case "design": return getDesignPrompt(framework);
     case "build":  return getBuildPrompt(framework);
+    case "test":   return getTestPrompt(framework);
     case "review": return getReviewPrompt(framework);
     case "fix":    return getFixPrompt(framework);
   }
@@ -34,6 +37,7 @@ function getModePrompt(mode: WorkerMode, framework?: string): string {
 const MODE_MAX_TURNS: Record<WorkerMode, number> = {
   design: 30,
   build: 50,
+  test: 30,
   review: 20,
   fix: 15,
 };

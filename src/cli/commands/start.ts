@@ -6,7 +6,7 @@
 import chalk from "chalk";
 import { spawn } from "child_process";
 import { stateManager } from "../../state/index.js";
-import { getAdapter } from "../../core/adapters/index.js";
+import { getAdapter, refreshAdapters } from "../../core/adapters/index.js";
 
 export async function startCommand() {
   const config = await stateManager.getConfig();
@@ -15,6 +15,7 @@ export async function startCommand() {
     return;
   }
 
+  await refreshAdapters();
   const adapter = getAdapter(config.framework);
   let devCommand = adapter.devCommand;
 

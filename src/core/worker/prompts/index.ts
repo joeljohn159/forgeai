@@ -4,6 +4,7 @@
 // ============================================================
 
 import { getAdapter } from "../../adapters/index.js";
+import { getA11yPromptAdditions } from "../../utils/a11y.js";
 
 /** Build the design system prompt, optionally with framework additions */
 export function getDesignPrompt(framework?: string): string {
@@ -148,6 +149,8 @@ ${langCheck}
 
 ${runBlock}
 
+${getA11yPromptAdditions()}
+
 ISSUE CLASSIFICATION:
 - MINOR: formatting, missing type annotation, unused import
   → Fix it directly, note what you fixed
@@ -161,6 +164,70 @@ Provide a structured review summary:
 - Issues auto-fixed
 - Commands run and their results
 - PASS or FAIL recommendation
+`.trim();
+}
+
+/** Test generation system prompt — framework-aware test runner */
+export function getTestPrompt(framework?: string): string {
+  const adapter = framework ? getAdapter(framework) : null;
+  const isGeneric = adapter?.id === "generic";
+  const testCmd = adapter?.testCommand || "npm test";
+  const testFramework = adapter?.testFramework || "the project's test framework";
+
+  const runBlock = isGeneric
+    ? `
+TEST RUNNER:
+- Detect the test framework from config files (package.json, pyproject.toml, pubspec.yaml, Cargo.toml, etc.)
+- Common test commands: npm test, npx vitest run, pytest, flutter test, cargo test, go test ./...
+- Run whichever test command exists — skip if none configured
+- Install the test framework if missing (e.g., npm install -D vitest @testing-library/react)
+`
+    : `
+TEST RUNNER:
+- Framework: ${testFramework}
+- Run: ${testCmd}
+- Install test dependencies if missing
+`;
+
+  return `
+You are a senior QA engineer writing automated tests within the Forge development framework.
+Your job is to generate comprehensive, meaningful tests for the code that was just built.
+
+TEST PRINCIPLES:
+- Test behavior, not implementation details
+- Each test should be independent and deterministic
+- Cover the happy path first, then edge cases
+- Use descriptive test names that explain WHAT is being tested and WHY
+- Prefer integration tests over unit tests for UI components
+- Mock external dependencies (APIs, databases), not internal code
+- Keep tests fast — avoid unnecessary setup/teardown
+
+WHAT TO TEST:
+1. Component rendering — does it render without errors?
+2. User interactions — clicks, form inputs, navigation
+3. State changes — does the UI update correctly?
+4. Error states — what happens when things fail?
+5. Edge cases — empty data, long strings, special characters
+6. API integration — correct requests, response handling
+7. Accessibility — ARIA attributes, keyboard navigation
+
+${runBlock}
+
+TEST FILE ORGANIZATION:
+- Co-locate tests with source files (e.g., Button.test.tsx next to Button.tsx)
+- Or use a __tests__/ directory within each feature folder
+- Follow the project's existing test patterns if any exist
+
+AFTER WRITING TESTS:
+1. Run the test suite — ALL tests must pass
+2. If a test fails, fix the test (not the source code, unless there's a genuine bug)
+3. Aim for meaningful coverage, not 100% line coverage
+
+DO NOT:
+- Write snapshot tests (they're fragile and provide little value)
+- Test implementation details (internal state, private methods)
+- Write tests that depend on each other
+- Leave TODO or skip markers
 `.trim();
 }
 
@@ -216,5 +283,6 @@ If your fix introduces new errors, undo it and try a different approach.
 
 export const DESIGN_SYSTEM_PROMPT = getDesignPrompt();
 export const BUILD_SYSTEM_PROMPT = getBuildPrompt();
+export const TEST_SYSTEM_PROMPT = getTestPrompt();
 export const REVIEW_SYSTEM_PROMPT = getReviewPrompt();
 export const FIX_SYSTEM_PROMPT = getFixPrompt();

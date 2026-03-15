@@ -12,7 +12,7 @@ export interface FrameworkAdapter {
   name: string;
 
   /** Language used */
-  language: "typescript" | "python";
+  language: "typescript" | "python" | "dart" | "javascript";
 
   /** Commands to scaffold a new project (run in order) */
   scaffoldCommands: string[];
@@ -45,7 +45,13 @@ export interface FrameworkAdapter {
   fileStructure: string;
 
   /** Package manager to use */
-  packageManager: "npm" | "pip" | "poetry";
+  packageManager: "npm" | "pip" | "poetry" | "pub" | "pnpm" | "yarn";
+
+  /** Test command */
+  testCommand?: string;
+
+  /** Test framework name */
+  testFramework?: string;
 
   /** Files that should always exist after scaffold */
   requiredFiles: string[];

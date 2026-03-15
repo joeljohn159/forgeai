@@ -18,6 +18,8 @@ export const reactViteAdapter: FrameworkAdapter = {
   designSupport: true,
   packageManager: "npm",
   requiredFiles: ["package.json", "tsconfig.json", "vite.config.ts", "index.html"],
+  testCommand: "npx vitest run",
+  testFramework: "Vitest",
 
   buildPromptAdditions: `
 FOR REACT + VITE:

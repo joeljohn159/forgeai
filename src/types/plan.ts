@@ -7,6 +7,7 @@ export type StoryStatus =
   | "designing"
   | "design-approved"
   | "building"
+  | "testing"
   | "reviewing"
   | "done"
   | "blocked";
@@ -45,9 +46,9 @@ export interface Plan {
 // State Types — Runtime pipeline state
 // ============================================================
 
-export type Phase = "init" | "plan" | "design" | "build" | "review" | "done";
+export type Phase = "init" | "plan" | "design" | "build" | "test" | "review" | "done";
 
-export type WorkerMode = "design" | "build" | "review" | "fix";
+export type WorkerMode = "design" | "build" | "test" | "review" | "fix";
 
 export interface QueuedChange {
   type: "visual-tweak" | "redesign" | "bug-fix" | "new-feature" | "content-change";

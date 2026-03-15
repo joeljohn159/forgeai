@@ -18,7 +18,19 @@ export { GitManager } from "./core/git/index.js";
 export { stateManager } from "./state/index.js";
 
 // Adapter system
-export { getAdapter, listAdapters } from "./core/adapters/index.js";
+export { getAdapter, listAdapters, refreshAdapters } from "./core/adapters/index.js";
+
+// Templates
+export { listTemplates, getTemplate } from "./core/templates/index.js";
+
+// Cost estimation
+export { estimateCost, formatCostEstimate } from "./core/utils/cost.js";
+
+// CI/CD generation
+export { generateGitHubActions, generateGitLabCI } from "./core/utils/cicd.js";
+
+// Visualizer
+export { generateVisualization } from "./core/visualizer/index.js";
 
 // Utilities
 export { validateConfig, loadAndValidateConfig } from "./core/utils/config.js";

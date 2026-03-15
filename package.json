@@ -1,6 +1,6 @@
 {
   "name": "forgecraft",
-  "version": "1.4.0",
+  "version": "2.0.0",
   "description": "AI Development Orchestration Framework — structured multi-agent pipeline for building software with human oversight",
   "type": "module",
   "main": "./dist/index.js",
@@ -54,7 +54,13 @@
     "nextjs",
     "react",
     "django",
-    "pipeline"
+    "vue",
+    "nuxt",
+    "svelte",
+    "sveltekit",
+    "flutter",
+    "pipeline",
+    "testing"
   ],
   "license": "MIT",
   "repository": {

@@ -59,8 +59,11 @@ export async function initCommand(options: {
       choices: [
         { name: "Next.js (TypeScript + Tailwind + App Router)", value: "nextjs" },
         { name: "React + Vite (TypeScript SPA)", value: "react" },
+        { name: "Vue 3 + Nuxt 3 (Composition API + Tailwind)", value: "vue" },
+        { name: "SvelteKit (Svelte 5 + Tailwind)", value: "svelte" },
         { name: "Django (Python + DRF)", value: "django" },
-        { name: "Other (Express, Vue, Svelte, Go, Rust, etc.)", value: "generic" },
+        { name: "Flutter (Dart + Material Design 3)", value: "flutter" },
+        { name: "Other (Express, Go, Rust, etc.)", value: "generic" },
       ],
       default: options.framework || "nextjs",
     },
@@ -113,6 +116,7 @@ export async function initCommand(options: {
     await fs.mkdir(forgeDir, { recursive: true });
     await fs.mkdir(path.join(forgeDir, "snapshots"), { recursive: true });
     await fs.mkdir(path.join(forgeDir, "designs"), { recursive: true });
+    await fs.mkdir(path.join(forgeDir, "adapters"), { recursive: true });
 
     // Write config
     await fs.writeFile(
@@ -160,6 +164,7 @@ export async function initCommand(options: {
     console.log(chalk.dim("    .forge/state.json        — Sprint state"));
     console.log(chalk.dim("    .forge/snapshots/        — Action snapshots"));
     console.log(chalk.dim("    .forge/designs/          — Design metadata"));
+    console.log(chalk.dim("    .forge/adapters/         — Custom framework adapters"));
     console.log(chalk.dim("    forge.config.json        — Project config"));
 
     if (answers.githubSync) {

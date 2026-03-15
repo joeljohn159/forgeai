@@ -11,7 +11,7 @@ import path from "path";
 import { stateManager } from "../../state/index.js";
 import { AutoPipeline } from "../../core/pipeline/auto.js";
 import { loadAndValidateConfig } from "../../core/utils/config.js";
-import { getAdapter } from "../../core/adapters/index.js";
+import { getAdapter, refreshAdapters } from "../../core/adapters/index.js";
 import {
   parseAttachments,
   stageAttachments,
@@ -45,6 +45,7 @@ export async function autoCommand(
     mute?: boolean;
     deploy?: boolean;
     skipDesign?: boolean;
+    skipTests?: boolean;
   }
 ) {
   // Auth check
@@ -70,6 +71,9 @@ export async function autoCommand(
   }
   const config = loadAndValidateConfig(rawConfig);
   if (!config) return;
+
+  // Load custom adapters from .forge/adapters/ (if any)
+  await refreshAdapters();
 
   // Auto-skip design for frameworks that don't support it
   const adapter = getAdapter(config.framework);
@@ -117,6 +121,7 @@ export async function autoCommand(
     mute: options.mute ?? false,
     deploy: options.deploy ?? false,
     skipDesign,
+    skipTests: options.skipTests ?? false,
     allowedDomains,
     attachments,
   });

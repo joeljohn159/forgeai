@@ -22,6 +22,11 @@ import { historyCommand, checkoutCommand } from "./commands/history.js";
 import { startCommand } from "./commands/start.js";
 import { pushCommand } from "./commands/push.js";
 import { upgradeCommand } from "./commands/upgrade.js";
+import { testCommand } from "./commands/test.js";
+import { templateCommand } from "./commands/template.js";
+import { estimateCommand } from "./commands/estimate.js";
+import { cicdCommand } from "./commands/cicd.js";
+import { vizCommand } from "./commands/viz.js";
 
 const program = new Command();
 
@@ -32,7 +37,7 @@ program
       " — AI Development Orchestration Framework\n" +
       "  Structured multi-agent pipeline: plan → design → build → review"
   )
-  .version("1.4.0");
+  .version("2.0.0");
 
 // ── Pipeline Commands ────────────────────────────────────
 
@@ -46,6 +51,7 @@ program
   .option("--mute", "Suppress notification sounds")
   .option("--deploy", "Configure GitHub Pages deployment after build")
   .option("--skip-design", "Skip design phase (faster, no Storybook previews)")
+  .option("--skip-tests", "Skip test generation phase")
   .action(autoCommand);
 
 program
@@ -96,6 +102,12 @@ program
   .description("Run QA review on completed stories")
   .option("-s, --story <storyId>", "Review a specific story only")
   .action(reviewCommand);
+
+program
+  .command("test")
+  .description("Generate and run tests for built stories")
+  .option("-s, --story <storyId>", "Test a specific story only")
+  .action(testCommand);
 
 program
   .command("start")
@@ -160,9 +172,33 @@ program
   .action(cleanCommand);
 
 program
+  .command("viz [path]")
+  .description("Interactive project map — visualize files, dependencies, and data flow")
+  .option("-o, --output <path>", "Output HTML file path")
+  .option("--no-open", "Don't auto-open in browser")
+  .action(vizCommand);
+
+program
   .command("doctor")
   .description("Diagnose setup issues and check system requirements")
   .action(doctorCommand);
+
+program
+  .command("estimate")
+  .description("Estimate token usage and cost for the current sprint plan")
+  .action(estimateCommand);
+
+program
+  .command("cicd")
+  .description("Generate CI/CD pipeline configuration")
+  .option("-p, --provider <provider>", "CI provider (github, gitlab)")
+  .action(cicdCommand);
+
+program
+  .command("template")
+  .description("Browse and use starter app templates")
+  .option("-l, --list", "List all available templates")
+  .action(templateCommand);
 
 program
   .command("upgrade")

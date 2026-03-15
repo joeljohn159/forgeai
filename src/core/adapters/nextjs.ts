@@ -15,6 +15,8 @@ export const nextjsAdapter: FrameworkAdapter = {
   designSupport: true,
   packageManager: "npm",
   requiredFiles: ["package.json", "tsconfig.json", "next.config.ts", "tailwind.config.ts"],
+  testCommand: "npx vitest run",
+  testFramework: "Vitest",
 
   buildPromptAdditions: `
 FOR NEXT.JS:

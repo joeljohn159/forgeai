@@ -196,6 +196,8 @@ export class Orchestrator {
         return this.craftDesignPrompt(story, context, adapter);
       case "build":
         return this.craftBuildPrompt(story, context, adapter);
+      case "test":
+        return this.craftBuildPrompt(story, context, adapter); // Tests use build prompt as base
       case "review":
         return this.craftReviewPrompt(story, context, adapter);
       case "fix":

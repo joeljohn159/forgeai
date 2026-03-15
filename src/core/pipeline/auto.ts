@@ -15,6 +15,9 @@ import { stateManager } from "../../state/index.js";
 import { playSound } from "../utils/sound.js";
 import { GitHubSync } from "../github/index.js";
 import { buildAttachmentPrompt, type Attachment } from "../utils/attachments.js";
+import { getAdapter } from "../adapters/index.js";
+import { estimateCost, formatCostEstimate } from "../utils/cost.js";
+import { generateVisualization } from "../visualizer/index.js";
 
 // ============================================================
 // Autonomous Pipeline
@@ -34,6 +37,7 @@ export interface AutoPipelineOptions {
   mute?: boolean;
   deploy?: boolean;
   skipDesign?: boolean;
+  skipTests?: boolean;
   attachments?: Attachment[];
 }
 
@@ -126,9 +130,10 @@ export class AutoPipeline {
     const needsBuild = allStories.some(
       (s) => s.status === "planned" || s.status === "design-approved"
     );
+    const needsTest = allStories.some((s) => s.status === "testing");
     const needsReview = allStories.some((s) => s.status === "reviewing");
 
-    if (!needsDesign && !needsBuild && !needsReview) {
+    if (!needsDesign && !needsBuild && !needsTest && !needsReview) {
       console.log(chalk.green("  Nothing to resume — all stories are complete or blocked.\n"));
       this.stopChatListener();
       return { success: true, plan: this.plan, errors };
@@ -149,6 +154,15 @@ export class AutoPipeline {
       catch (err) {
         await this.saveProgressOnError("build");
         errors.push(`Build: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
+    // Test (stories that just finished building)
+    if (needsTest || needsBuild) {
+      try { await this.runTestPhase(this.plan); }
+      catch (err) {
+        await this.saveProgressOnError("test");
+        errors.push(`Test: ${err instanceof Error ? err.message : err}`);
       }
     }
 
@@ -207,6 +221,11 @@ export class AutoPipeline {
       planSpinner.succeed(`${this.elapsed()} Plan ready`);
       this.activeSpinner = null;
       this.displayPlan(this.plan);
+
+      // Show cost estimate
+      const costEst = estimateCost(this.plan, this.config.model);
+      console.log(chalk.dim(`  Estimated cost: ~$${costEst.estimatedCostUsd.toFixed(2)} (${this.config.model})\n`));
+
       await stateManager.savePlan(this.plan);
       await stateManager.updatePhase("plan");
       await this.git.commitState("Sprint plan");
@@ -255,6 +274,17 @@ export class AutoPipeline {
       errors.push(`Build: ${err instanceof Error ? err.message : err}`);
     }
 
+    // ── Test ────────────────────────────────────────────────
+    if (this.options.skipTests) {
+      console.log(chalk.dim(`\n  Test skipped (--skip-tests)\n`));
+    } else {
+      try { await this.runTestPhase(this.plan); }
+      catch (err) {
+        await this.saveProgressOnError("test");
+        errors.push(`Test: ${err instanceof Error ? err.message : err}`);
+      }
+    }
+
     // ── README ─────────────────────────────────────────────
     try { await this.generateReadme(this.plan); }
     catch (err) { errors.push(`README: ${err instanceof Error ? err.message : err}`); }
@@ -282,6 +312,17 @@ export class AutoPipeline {
     if (this.options.deploy) {
       try { await this.runDeployPhase(this.plan); }
       catch (err) { errors.push(`Deploy: ${err instanceof Error ? err.message : err}`); }
+    }
+
+    // ── Project Map ────────────────────────────────────────
+    try {
+      const vizSpinner = ora({ text: `${this.elapsed()} Generating project map...`, indent: 2 }).start();
+      this.activeSpinner = vizSpinner;
+      const { graph } = await generateVisualization({ open: false });
+      vizSpinner.succeed(`${this.elapsed()} Project map (${graph.totalFiles} files)`);
+      this.activeSpinner = null;
+    } catch {
+      // Best-effort — don't fail the sprint for viz
     }
 
     // ── Auto-push to GitHub ───────────────────────────────
@@ -617,6 +658,105 @@ export class AutoPipeline {
       progress.stop();
       this.activeSpinner = null;
     }
+  }
+
+  // ── Test Phase ──────────────────────────────────────────
+
+  private async runTestPhase(plan: Plan): Promise<void> {
+    // Test stories that just finished building (status "reviewing" means built, ready for QA)
+    const testable = this.getAllStories(plan).filter(
+      (s) => s.status === "reviewing" || s.status === "testing"
+    );
+    if (testable.length === 0) return;
+
+    let adapter: any = null;
+    try { adapter = getAdapter(this.config.framework); } catch { /* ignore */ }
+
+    // Skip test phase if adapter has no testCommand and framework isn't generic
+    if (adapter && !adapter.testCommand && adapter.id !== "generic") return;
+
+    console.log(chalk.bold(`\n  Test`) + chalk.dim(` · ${testable.length} stories\n`));
+
+    for (let i = 0; i < testable.length; i++) {
+      const story = testable[i];
+      const label = `[${i + 1}/${testable.length}] ${story.title}`;
+      const spinner = ora({ text: `${this.elapsed()} ${label}`, indent: 2 }).start();
+      this.activeSpinner = spinner;
+      const progress = this.makeProgress(spinner, label);
+
+      try {
+        story.status = "testing";
+
+        const testPrompt = this.craftTestPrompt(story, plan, adapter);
+        const result = await this.worker.run("test", testPrompt, {
+          onProgress: progress.onProgress,
+        });
+
+        this.addUsage(result.usage);
+        const tokens = chalk.dim(
+          `${this.formatTokens(result.usage.inputTokens)} in / ${this.formatTokens(result.usage.outputTokens)} out`
+        );
+
+        if (result.success) {
+          await this.git.commitAll(`test: ${story.title}`);
+          story.status = "reviewing"; // Move back to reviewing for QA phase
+          spinner.succeed(
+            `${this.elapsed()} ${label}` +
+              chalk.dim(` · ${result.filesCreated.length} test files`) +
+              ` ${tokens}`
+          );
+        } else {
+          // Tests failed but don't block — still move to review
+          story.status = "reviewing";
+          spinner.warn(`${this.elapsed()} ${label}` + chalk.dim(" tests incomplete") + ` ${tokens}`);
+        }
+      } finally {
+        progress.stop();
+        this.activeSpinner = null;
+      }
+    }
+
+    await stateManager.savePlan(plan);
+    await stateManager.updatePhase("test");
+    await this.git.commitState("Tests generated");
+  }
+
+  private craftTestPrompt(story: Story, plan: Plan, adapter: any): string {
+    const isGeneric = !adapter || adapter.id === "generic";
+
+    const testInfo = isGeneric
+      ? `
+        Detect the test framework from the project's config files.
+        Common setups: Vitest, Jest, pytest, Flutter test, Go test, Cargo test.
+        Install test dependencies if needed.
+      `
+      : `
+        Test framework: ${adapter.testFramework || "Vitest"}
+        Test command: ${adapter.testCommand || "npm test"}
+      `;
+
+    return `
+      Generate tests for: "${story.title}"
+
+      Description: ${story.description}
+      App: ${plan.project} (${plan.framework})
+
+      ${testInfo}
+
+      Steps:
+      1. Read the source files for this story to understand what was built
+      2. Create test files co-located with the source (e.g., Component.test.tsx)
+      3. Write meaningful tests covering:
+         - Happy path (main functionality works)
+         - Error handling (graceful failures)
+         - Edge cases (empty data, boundary values)
+         - User interactions (if UI)
+      4. Run the test suite — all tests must pass
+      5. If tests fail, fix them (fix the test, not the source, unless there's a genuine bug)
+
+      Do NOT write snapshot tests.
+      Focus on behavior, not implementation details.
+    `;
   }
 
   // ── README Generation ─────────────────────────────────────

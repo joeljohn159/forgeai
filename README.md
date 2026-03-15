@@ -231,6 +231,20 @@ forge auto "a FastAPI backend with SQLAlchemy and JWT auth"
 
 Worker prompts automatically adapt to the framework — Next.js gets App Router instructions, Vite gets SPA routing, Django gets migration commands, and generic projects get smart auto-detection.
 
+### Project Visualizer (`forge viz`)
+Generate a self-contained interactive HTML dashboard for any project. No external dependencies — everything is inlined. Works offline, shareable as a single file.
+
+**Dashboard includes:**
+
+- **Overview** — Code health score (A-F grade), project summary, file distribution, language breakdown, complexity hotspots, most-used modules, circular dependency detection, orphan file detection, test coverage map
+- **Architecture** — Layered diagram showing how files flow from entry points through presentation, components, state, API, core logic, and config
+- **System Map** — SVG-based architecture diagram with component boxes, directional arrows, import counts, dashed boundary zones, zoom/pan, keyboard navigation, minimap, and PNG export
+- **Files** — Full file list with test coverage indicators (green/red dots), sortable by category
+- **API Docs** — Auto-generated endpoint documentation from detected routes, grouped by base path with parameter extraction
+- **Diff Mode** — Compare current scan vs previous (added/removed/changed files, line deltas, health score change). Snapshots saved automatically to `.forge/viz-snapshot.json`
+- **File Detail** — Click any file to see stats, exports, routes, dependencies, dependents, first 25 lines of code preview with line numbers, and an "Open in VS Code" button that reuses your existing window
+- **Search** — Press `/` to fuzzy-search files across the sidebar
+
 ### Sprint Resume
 If a build gets interrupted (auth expires, network drops, you close the terminal), your progress is saved. Run `forge resume` to pick up exactly where you left off. Blocked stories can be retried.
 
@@ -271,6 +285,15 @@ forge start                           # Start the dev server (auto-detects frame
 forge push                            # Push commits + tags to GitHub
 ```
 
+### Visualizer & Insights
+
+```bash
+forge viz                             # Interactive project dashboard (opens in browser)
+forge viz /path/to/project            # Visualize a specific project
+forge viz --no-open                   # Generate without opening browser
+forge viz -o report.html              # Custom output path
+```
+
 ### Utilities
 
 ```bash
@@ -286,6 +309,11 @@ forge checkout <version>              # Jump to a specific version or checkpoint
 forge export                          # Export sprint plan as markdown
 forge clean                           # Reset sprint state (keeps config)
 forge doctor                          # Diagnose setup issues
+forge estimate                        # Estimate token usage and cost for sprint
+forge cicd                            # Generate CI/CD pipeline configuration
+forge template                        # Browse and use starter app templates
+forge upgrade                         # Upgrade Forge to the latest version
+forge test                            # Generate and run tests for built stories
 ```
 
 <br/>
@@ -340,6 +368,11 @@ src/
 │   │
 │   ├── github/
 │   │   └── index.ts                  # GitHub Issues sync (via gh CLI)
+│   │
+│   ├── visualizer/
+│   │   ├── index.ts                  # Orchestrates scan → HTML → browser open
+│   │   ├── scanner.ts                # Recursive project scanner (imports, exports, routes, deps)
+│   │   └── template.ts              # Self-contained HTML dashboard generator
 │   │
 │   └── utils/
 │       ├── attachments.ts            # Drag & drop file attachment parser
@@ -426,6 +459,7 @@ After `forge init`, your `forge.config.json` controls:
 | Review | Manual | None | None | **Automated QA + auto-fix** |
 | Git strategy | Manual | Manual | Manual | **Auto commits + tags + push** |
 | Parallelism | N/A | N/A | N/A | **Dependency-grouped parallel** |
+| Project visualization | N/A | N/A | N/A | **Interactive dashboard + health score** |
 | Human oversight | Full control | None | Approve/reject | **Stage gates + live feedback** |
 | Bug fix with screenshots | N/A | N/A | N/A | **forge fix --image + drag & drop** |
 | SEO & assets | You remember | You remember | You remember | **Built-in defaults** |
@@ -455,23 +489,53 @@ After `forge init`, your `forge.config.json` controls:
 - Config validation with actionable error messages
 - Token expiry handling with auto-retry
 
-**v1.1** — Current
+**v1.1**
 - **Any tech stack support** — generic adapter auto-detects language, package manager, build commands, and project structure. Works with Express, Vue, Svelte, Go, Rust, FastAPI, Rails, and more.
 - **`--yes` flag** — skip all confirmation prompts for fully hands-free operation
-- **Drag & drop attachments** — attach mockups, screenshots, specs, and design files by dragging into the terminal. Supports images, PDFs, docs, and design files.
+- **Drag & drop attachments** — attach mockups, screenshots, specs, and design files by dragging into the terminal
 - Published as `forgecraft` on npm
 
-**v1.2** — Next Up
+**v2.0** — Current
+- **`forge viz`** — Interactive project visualizer with self-contained HTML dashboard
+  - Code health score (A-F grade) with detailed breakdown
+  - Circular dependency detection (DFS-based, capped at 50 cycles)
+  - Orphan file detection (files with no imports and no dependents)
+  - Test coverage map with covered/uncovered indicators
+  - SVG system architecture diagram with zoom, pan, minimap, keyboard nav
+  - PNG export for system map
+  - Diff mode — compare scans over time (added/removed/changed files, health delta)
+  - Auto-generated API documentation from detected routes
+  - File preview with line numbers and "Open in VS Code" integration
+  - Fully self-contained, offline-capable, shareable as a single HTML file
+- **`forge test`** — auto-generate and run tests for built stories
+- **`forge estimate`** — token usage and cost estimation
+- **`forge cicd`** — CI/CD pipeline generation (GitHub Actions, GitLab CI)
+- **`forge template`** — starter app template browser
+- **`forge upgrade`** — self-update command
+- 29 CLI commands total
+
+---
+
+## Future Plans
+
+### v2.1 — Next Up
+- **Visualizer: Live mode** — watch file system for changes and auto-refresh the dashboard in real time
+- **Visualizer: Dependency graph view** — interactive force-directed graph with filtering by module, role, or category
+- **Visualizer: Git blame integration** — show who last modified each file, commit recency heatmap
+- **Visualizer: Bundle size analysis** — estimate production bundle size per entry point, flag heavy imports
+- **Visualizer: Code duplication detection** — find similar code blocks across files, suggest consolidation
 - **Test generation phase** — auto-generate unit and integration tests after build (Vitest, pytest, Flutter test)
 - **Custom adapter plugin API** — drop a JS file in `.forge/adapters/` to add your own framework
 
-**v1.2** — Planned
+### v2.2 — Planned
 - **Multi-provider support** — swap Claude for OpenAI, Gemini, or local models (Ollama) per agent
 - **Web dashboard** — browser-based sprint monitoring with real-time build progress, token usage charts, and story diffs
 - **CI/CD integration** — GitHub Actions / GitLab CI pipeline generation, auto-run tests on PR, deploy previews
 - **Cost estimation** — token budget planning before sprint starts, per-story cost breakdown, spending alerts
+- **Visualizer: Performance profiling** — detect potential performance bottlenecks (large components, deep dependency chains, circular renders)
+- **Visualizer: Security audit** — flag potential issues (hardcoded secrets, unsafe deps, missing auth checks)
 
-**v2.0** — Future
+### v3.0 — Future Vision
 - **Team collaboration** — multiple users can queue feedback on the same sprint, role-based permissions (lead reviews, dev builds)
 - **Monorepo support** — run separate pipelines for `packages/*` with shared dependency tracking
 - **Visual regression testing** — screenshot comparison between versions, flag UI drift automatically
@@ -480,6 +544,9 @@ After `forge init`, your `forge.config.json` controls:
 - **i18n / localization** — generate translation keys and locale files from built UI, support RTL layouts
 - **Plugin system** — community-built pipeline phases (e.g., performance audit, API docs, Docker setup)
 - **Template library** — starter templates for common app types (SaaS dashboard, e-commerce, blog, landing page)
+- **Visualizer: AI insights** — natural language summary of codebase ("Your API layer has 3 circular deps, 12 untested endpoints, and 4 files over 500 lines")
+- **Visualizer: Multi-project comparison** — compare architecture and health across multiple repos side by side
+- **Visualizer: Timeline replay** — animate how the codebase evolved over time using saved snapshots
 
 <br/>
 

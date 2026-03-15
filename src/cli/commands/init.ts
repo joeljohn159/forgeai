@@ -60,7 +60,7 @@ export async function initCommand(options: {
         { name: "Next.js (TypeScript + Tailwind + App Router)", value: "nextjs" },
         { name: "React + Vite (TypeScript SPA)", value: "react" },
         { name: "Django (Python + DRF)", value: "django" },
-        { name: "Flutter (coming soon)", value: "flutter", disabled: true },
+        { name: "Other (Express, Vue, Svelte, Go, Rust, etc.)", value: "generic" },
       ],
       default: options.framework || "nextjs",
     },

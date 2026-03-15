@@ -6,11 +6,13 @@ import type { FrameworkAdapter } from "./base.js";
 import { nextjsAdapter } from "./nextjs.js";
 import { reactViteAdapter } from "./react-vite.js";
 import { djangoAdapter } from "./django.js";
+import { genericAdapter } from "./generic.js";
 
 const adapters: Record<string, FrameworkAdapter> = {
   nextjs: nextjsAdapter,
   react: reactViteAdapter,
   django: djangoAdapter,
+  generic: genericAdapter,
 };
 
 /** Get the adapter for a framework. Throws if unknown. */

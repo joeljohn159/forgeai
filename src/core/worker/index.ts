@@ -67,6 +67,7 @@ export interface WorkerProgressCallback {
 
 export interface WorkerSandboxOptions {
   sandbox?: boolean;
+  yes?: boolean;
   workingDir?: string;
   allowedDomains?: string[];
 }
@@ -169,6 +170,10 @@ export class Worker {
       maxTurns: MODE_MAX_TURNS[mode],
     };
 
+    if (this.sandboxOpts.yes && !this.sandboxOpts.sandbox) {
+      sdkOptions.permissionMode = "bypassPermissions";
+    }
+
     if (this.sandboxOpts.sandbox) {
       sdkOptions.permissionMode = "bypassPermissions";
       sdkOptions.sandbox = {
@@ -234,11 +239,21 @@ export class Worker {
           if ("result" in msg && typeof msg.result === "string") {
             result.summary = msg.result;
           }
-          if ("errors" in msg && Array.isArray(msg.errors) && msg.errors.length > 0) {
-            result.errors.push(...msg.errors);
+          // Check for errors — handle empty strings and objects
+          const hasError = "is_error" in msg && msg.is_error;
+          const errors = "errors" in msg && Array.isArray(msg.errors) ? msg.errors : [];
+          const subtype = "subtype" in msg ? String(msg.subtype || "") : "";
+
+          if (errors.length > 0) {
+            for (const e of errors) {
+              const eStr = typeof e === "string" ? e : JSON.stringify(e);
+              if (eStr && eStr.length > 0) result.errors.push(eStr);
+            }
           }
-          if ("is_error" in msg && msg.is_error) {
-            result.errors.push(msg.subtype || "unknown error");
+          if (hasError && result.errors.length === 0) {
+            result.errors.push(
+              subtype || "Claude encountered an error. Run: claude login"
+            );
           }
           // Extract token usage — SDK result gives cumulative totals, so overwrite
           if (msg.usage) {
@@ -332,7 +347,7 @@ export class Worker {
 
   private shortPath(p?: string): string {
     if (!p) return "";
-    const parts = p.split("/");
+    const parts = p.split(/[/\\]/);
     return parts.length > 2 ? ".../" + parts.slice(-2).join("/") : p;
   }
 }

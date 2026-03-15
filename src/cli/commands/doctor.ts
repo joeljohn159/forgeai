@@ -19,7 +19,8 @@ interface Check {
 
 function checkCommand(cmd: string): boolean {
   try {
-    execSync(`which ${cmd}`, { stdio: "ignore" });
+    const finder = process.platform === "win32" ? "where" : "which";
+    execSync(`${finder} ${cmd}`, { stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -109,11 +110,13 @@ export async function doctorCommand() {
       });
     }
     if (framework === "django") {
-      const hasPython = checkCommand("python3");
+      // Windows uses "python", Unix uses "python3"
+      const pythonCmd = process.platform === "win32" ? "python" : "python3";
+      const hasPython = checkCommand(pythonCmd);
       checks.push({
         name: "Python 3",
         status: hasPython ? "pass" : "fail",
-        detail: hasPython ? getVersion("python3") : "not found",
+        detail: hasPython ? getVersion(pythonCmd) : "not found",
         fix: !hasPython ? "Install Python 3.10+: https://python.org" : undefined,
       });
     }

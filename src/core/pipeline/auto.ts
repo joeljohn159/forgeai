@@ -14,6 +14,7 @@ import { GitManager } from "../git/index.js";
 import { stateManager } from "../../state/index.js";
 import { playSound } from "../utils/sound.js";
 import { GitHubSync } from "../github/index.js";
+import { buildAttachmentPrompt, type Attachment } from "../utils/attachments.js";
 
 // ============================================================
 // Autonomous Pipeline
@@ -27,11 +28,13 @@ import { GitHubSync } from "../github/index.js";
 export interface AutoPipelineOptions {
   workingDir?: string;
   sandbox?: boolean;
+  yes?: boolean;
   allowedDomains?: string[];
   quiet?: boolean;
   mute?: boolean;
   deploy?: boolean;
   skipDesign?: boolean;
+  attachments?: Attachment[];
 }
 
 export class AutoPipeline {
@@ -57,6 +60,7 @@ export class AutoPipeline {
       config,
       {
         sandbox: options.sandbox ?? true,
+        yes: options.yes ?? false,
         workingDir: options.workingDir,
         allowedDomains: options.allowedDomains,
       },
@@ -95,7 +99,10 @@ export class AutoPipeline {
     };
 
     process.on("SIGINT", handler);
-    process.on("SIGTERM", handler);
+    // SIGTERM is unreliable on Windows — only register on Unix
+    if (process.platform !== "win32") {
+      process.on("SIGTERM", handler);
+    }
   }
 
   // ── Resume an interrupted sprint ──────────────────────────
@@ -180,7 +187,11 @@ export class AutoPipeline {
     this.startTime = Date.now();
 
     console.log(chalk.bold("\n  forge") + chalk.dim(" auto"));
-    console.log(chalk.dim(`  sandbox ${this.options.sandbox !== false ? "on" : "off"} · type a message anytime to queue feedback\n`));
+    const flags = [
+      `sandbox ${this.options.sandbox !== false ? "on" : "off"}`,
+      ...(this.options.yes ? ["auto-approve on"] : []),
+    ].join(" · ");
+    console.log(chalk.dim(`  ${flags} · type a message anytime to queue feedback\n`));
 
     this.startChatListener();
 
@@ -191,7 +202,8 @@ export class AutoPipeline {
     const planSpinner = ora({ text: `${this.elapsed()} Planning...`, indent: 2 }).start();
     this.activeSpinner = planSpinner;
     try {
-      this.plan = await this.orchestrator.generatePlan(description);
+      const attachmentContext = buildAttachmentPrompt(this.options.attachments || []);
+      this.plan = await this.orchestrator.generatePlan(description + attachmentContext);
       planSpinner.succeed(`${this.elapsed()} Plan ready`);
       this.activeSpinner = null;
       this.displayPlan(this.plan);
@@ -206,9 +218,12 @@ export class AutoPipeline {
       planSpinner.fail(`${this.elapsed()} Planning failed`);
       this.activeSpinner = null;
       const msg = err instanceof Error ? err.message : String(err);
-      console.log(chalk.red(`\n  ${msg}`));
-      if (err instanceof Error && err.stack) {
-        console.log(chalk.dim(`  ${err.stack.split("\n").slice(1, 3).join("\n  ")}`));
+      console.log(chalk.red(`\n  ${msg}\n`));
+      if (!msg.includes("Possible fixes")) {
+        console.log(chalk.dim("  Possible fixes:"));
+        console.log(chalk.dim("    1. Run: claude login"));
+        console.log(chalk.dim("    2. Check your internet connection"));
+        console.log(chalk.dim("    3. Run: forge doctor\n"));
       }
       this.stopChatListener();
       return { success: false, plan: null, errors: [`Plan: ${msg}`] };
@@ -665,6 +680,7 @@ export class AutoPipeline {
   // ── Review Gate ───────────────────────────────────────────
 
   private async reviewGate(): Promise<"continue" | "skip" | "abort"> {
+    if (this.options.yes) return "continue";
     if (!process.stdout.isTTY) return "continue";
 
     // Notify user that build is done

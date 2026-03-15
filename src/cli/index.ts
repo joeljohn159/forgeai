@@ -21,6 +21,7 @@ import { exportCommand } from "./commands/export.js";
 import { historyCommand, checkoutCommand } from "./commands/history.js";
 import { startCommand } from "./commands/start.js";
 import { pushCommand } from "./commands/push.js";
+import { upgradeCommand } from "./commands/upgrade.js";
 
 const program = new Command();
 
@@ -31,7 +32,7 @@ program
       " — AI Development Orchestration Framework\n" +
       "  Structured multi-agent pipeline: plan → design → build → review"
   )
-  .version("1.0.0");
+  .version("1.4.0");
 
 // ── Pipeline Commands ────────────────────────────────────
 
@@ -39,6 +40,7 @@ program
   .command("auto [description]")
   .description("Fully autonomous mode — plan, build, and review in one command")
   .option("--no-sandbox", "Disable sandbox (not recommended)")
+  .option("-y, --yes", "Skip all confirmation prompts (auto-approve everything)")
   .option("-q, --quiet", "Hide live agent output, show spinners only")
   .option("--allow-network <domains>", "Comma-separated allowed network domains")
   .option("--mute", "Suppress notification sounds")
@@ -50,6 +52,7 @@ program
   .command("resume")
   .description("Resume an interrupted sprint from where it left off")
   .option("--no-sandbox", "Disable sandbox")
+  .option("-y, --yes", "Skip all confirmation prompts (auto-approve everything)")
   .option("-q, --quiet", "Spinners only")
   .option("--mute", "Suppress sounds")
   .option("--skip-design", "Skip design phase")
@@ -160,6 +163,11 @@ program
   .command("doctor")
   .description("Diagnose setup issues and check system requirements")
   .action(doctorCommand);
+
+program
+  .command("upgrade")
+  .description("Upgrade Forge to the latest version")
+  .action(upgradeCommand);
 
 // ── Parse ─────────────────────────────────────────────────
 

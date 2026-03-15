@@ -11,6 +11,12 @@ import { stateManager } from "../../state/index.js";
 import { Orchestrator } from "../../core/orchestrator/index.js";
 import { Worker } from "../../core/worker/index.js";
 import { GitManager } from "../../core/git/index.js";
+import {
+  parseAttachments,
+  stageAttachments,
+  formatAttachmentList,
+  buildAttachmentPrompt,
+} from "../../core/utils/attachments.js";
 
 export async function fixCommand(description: string, options?: { image?: string }) {
   const config = await stateManager.getConfig();
@@ -30,10 +36,21 @@ export async function fixCommand(description: string, options?: { image?: string
     return;
   }
 
+  // Parse attachments from description (drag-and-drop file paths)
+  const parsed = parseAttachments(description);
+  if (parsed.attachments.length > 0) {
+    description = parsed.description;
+    stageAttachments(parsed.attachments);
+  }
+
   console.log(chalk.bold("\n  forge fix\n"));
   console.log(chalk.dim(`  "${description}"`));
   if (options?.image) {
     console.log(chalk.dim(`  image: ${options.image}`));
+  }
+  if (parsed.attachments.length > 0) {
+    console.log(chalk.dim("\n  Attachments:"));
+    console.log(chalk.cyan(formatAttachmentList(parsed.attachments)));
   }
   console.log("");
 
@@ -68,10 +85,13 @@ export async function fixCommand(description: string, options?: { image?: string
         commitBefore: headBefore,
       });
 
-      // Build prompt — include image reference if provided
+      // Build prompt — include image/attachment references
       let fixPrompt = decision.prompt || description;
       if (options?.image) {
         fixPrompt += `\n\nA screenshot has been saved at: ${options.image}\nRead this image file to see the visual issue the user is referring to.`;
+      }
+      if (parsed.attachments.length > 0) {
+        fixPrompt += "\n" + buildAttachmentPrompt(parsed.attachments);
       }
 
       const result = await worker.run(mode, fixPrompt, {

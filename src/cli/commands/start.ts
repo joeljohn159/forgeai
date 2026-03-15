@@ -16,11 +16,38 @@ export async function startCommand() {
   }
 
   const adapter = getAdapter(config.framework);
-  const [cmd, ...args] = adapter.devCommand.split(" ");
+  let devCommand = adapter.devCommand;
+
+  // For generic adapter, try to detect the dev command from package.json
+  if (adapter.id === "generic") {
+    try {
+      const { readFileSync } = await import("fs");
+      const pkg = JSON.parse(readFileSync("package.json", "utf-8"));
+      if (pkg.scripts?.dev) {
+        devCommand = "npm run dev";
+      } else if (pkg.scripts?.start) {
+        devCommand = "npm start";
+      } else if (pkg.scripts?.serve) {
+        devCommand = "npm run serve";
+      }
+    } catch {
+      // No package.json — try common alternatives
+      const { existsSync } = await import("fs");
+      if (existsSync("manage.py")) {
+        devCommand = "python manage.py runserver";
+      } else if (existsSync("Cargo.toml")) {
+        devCommand = "cargo run";
+      } else if (existsSync("go.mod")) {
+        devCommand = "go run .";
+      }
+    }
+  }
+
+  const [cmd, ...args] = devCommand.split(" ");
 
   console.log(chalk.bold("\n  forge") + chalk.dim(" start"));
-  console.log(chalk.dim(`  ${adapter.name} dev server on port ${adapter.devPort}\n`));
-  console.log(chalk.dim(`  Running: ${adapter.devCommand}\n`));
+  console.log(chalk.dim(`  ${adapter.id === "generic" ? "Custom stack" : adapter.name} dev server\n`));
+  console.log(chalk.dim(`  Running: ${devCommand}\n`));
 
   const child = spawn(cmd, args, {
     cwd: process.cwd(),
@@ -30,7 +57,7 @@ export async function startCommand() {
 
   child.on("error", (err) => {
     console.log(chalk.red(`\n  Failed to start: ${err.message}`));
-    console.log(chalk.dim(`  Try running manually: ${adapter.devCommand}\n`));
+    console.log(chalk.dim(`  Try running manually: ${devCommand}\n`));
   });
 
   child.on("exit", (code) => {

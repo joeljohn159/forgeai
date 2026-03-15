@@ -1,19 +1,26 @@
 import type { FrameworkAdapter } from "./base.js";
 
+const isWin = process.platform === "win32";
+const venvBin = isWin ? "venv\\Scripts" : "venv/bin";
+const python = isWin ? "python" : "python3";
+const venvPython = isWin ? `${venvBin}\\python` : `${venvBin}/python`;
+const venvPip = isWin ? `${venvBin}\\pip` : `${venvBin}/pip`;
+const venvDjangoAdmin = isWin ? `${venvBin}\\django-admin` : `${venvBin}/django-admin`;
+
 export const djangoAdapter: FrameworkAdapter = {
   id: "django",
   name: "Django",
   language: "python",
   scaffoldCommands: [
-    "python3 -m venv venv",
-    "venv/bin/pip install django djangorestframework django-cors-headers python-dotenv",
-    "venv/bin/django-admin startproject config .",
-    "venv/bin/python manage.py startapp core",
+    `${python} -m venv venv`,
+    `${venvPip} install django djangorestframework django-cors-headers python-dotenv`,
+    `${venvDjangoAdmin} startproject config .`,
+    `${venvPython} manage.py startapp core`,
   ],
-  buildCommand: "venv/bin/python manage.py check --deploy",
-  lintCommand: "venv/bin/python -m py_compile manage.py",
-  typecheckCommand: "echo 'Type checking skipped (Python)'",
-  devCommand: "venv/bin/python manage.py runserver",
+  buildCommand: `${venvPython} manage.py check --deploy`,
+  lintCommand: `${venvPython} -m py_compile manage.py`,
+  typecheckCommand: isWin ? "echo Type checking skipped (Python)" : "echo 'Type checking skipped (Python)'",
+  devCommand: `${venvPython} manage.py runserver`,
   devPort: 8000,
   designSupport: false,
   packageManager: "pip",
@@ -34,6 +41,11 @@ FOR DJANGO:
 - Register models in admin.py for Django Admin access
 - Use django-cors-headers for API CORS configuration
 
+PLATFORM NOTE:
+- On Windows, use venv\\Scripts\\python instead of venv/bin/python
+- On Unix/macOS, use venv/bin/python
+- Detect the platform and use the correct path
+
 SECURITY:
 - CSRF protection enabled by default — don't disable it
 - Use Django's built-in auth system (User model, login/logout views)
@@ -41,12 +53,12 @@ SECURITY:
 - Configure ALLOWED_HOSTS properly
 
 AFTER WRITING CODE:
-1. Run: venv/bin/python manage.py makemigrations
-2. Run: venv/bin/python manage.py migrate
-3. Run: venv/bin/python manage.py check --deploy
+1. Run: ${venvPython} manage.py makemigrations
+2. Run: ${venvPython} manage.py migrate
+3. Run: ${venvPython} manage.py check --deploy
 4. Fix any warnings or errors before proceeding
 
-ALWAYS generate a requirements.txt with: venv/bin/pip freeze > requirements.txt
+ALWAYS generate a requirements.txt with: ${venvPip} freeze > requirements.txt
 `.trim(),
 
   designPromptAdditions: `

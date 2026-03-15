@@ -12,10 +12,17 @@ import { stateManager } from "../../state/index.js";
 import { AutoPipeline } from "../../core/pipeline/auto.js";
 import { loadAndValidateConfig } from "../../core/utils/config.js";
 import { getAdapter } from "../../core/adapters/index.js";
+import {
+  parseAttachments,
+  stageAttachments,
+  formatAttachmentList,
+  type Attachment,
+} from "../../core/utils/attachments.js";
 
 function checkClaudeAuth(): { ok: boolean; reason: string } {
   try {
-    execSync("which claude", { stdio: "ignore" });
+    const finder = process.platform === "win32" ? "where" : "which";
+    execSync(`${finder} claude`, { stdio: "ignore" });
   } catch {
     return { ok: false, reason: "Claude Code CLI is not installed." };
   }
@@ -32,6 +39,7 @@ export async function autoCommand(
   description: string | undefined,
   options: {
     sandbox?: boolean;
+    yes?: boolean;
     quiet?: boolean;
     allowNetwork?: string;
     mute?: boolean;
@@ -68,6 +76,7 @@ export async function autoCommand(
   const skipDesign = options.skipDesign || !adapter.designSupport;
 
   if (!description) {
+    console.log(chalk.dim("  Tip: drag & drop files here to attach references\n"));
     const { desc } = await inquirer.prompt([
       {
         type: "input",
@@ -80,17 +89,36 @@ export async function autoCommand(
     description = desc;
   }
 
+  // Parse attachments from description (drag-and-drop file paths)
+  const parsed = parseAttachments(description!);
+  let attachments: Attachment[] = [];
+
+  if (parsed.attachments.length > 0) {
+    attachments = parsed.attachments;
+    description = parsed.description;
+
+    // Stage files to .forge/attachments/
+    stageAttachments(attachments);
+
+    // Show clean attachment list
+    console.log(chalk.dim("\n  Attachments:"));
+    console.log(chalk.cyan(formatAttachmentList(attachments)));
+    console.log("");
+  }
+
   const allowedDomains = options.allowNetwork
     ? options.allowNetwork.split(",").map((d) => d.trim())
     : undefined;
 
   const pipeline = new AutoPipeline(config, {
     sandbox: options.sandbox !== false,
+    yes: options.yes ?? false,
     quiet: options.quiet ?? false,
     mute: options.mute ?? false,
     deploy: options.deploy ?? false,
     skipDesign,
     allowedDomains,
+    attachments,
   });
 
   const result = await pipeline.run(description!);

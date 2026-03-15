@@ -7,12 +7,14 @@ import chalk from "chalk";
 import inquirer from "inquirer";
 import fs from "fs";
 import path from "path";
+import os from "os";
 import { stateManager } from "../../state/index.js";
 import { AutoPipeline } from "../../core/pipeline/auto.js";
 import type { Plan, Story } from "../../types/plan.js";
 
 export async function resumeCommand(options: {
   sandbox?: boolean;
+  yes?: boolean;
   quiet?: boolean;
   mute?: boolean;
   skipDesign?: boolean;
@@ -24,7 +26,7 @@ export async function resumeCommand(options: {
   } catch {
     // CWD was deleted (e.g., by a prior interrupted build). Fall back to home dir
     // and look for the project from the forge state files.
-    const home = process.env.HOME || process.env.USERPROFILE || "/tmp";
+    const home = process.env.HOME || process.env.USERPROFILE || os.tmpdir();
     process.chdir(home);
     console.log(chalk.yellow("\n  Working directory no longer exists."));
     console.log(chalk.dim(`  Falling back to: ${home}`));
@@ -93,21 +95,25 @@ export async function resumeCommand(options: {
     console.log("");
   }
 
-  // Confirm
-  const { action } = await inquirer.prompt([
-    {
-      type: "list",
-      name: "action",
-      message: "What would you like to do?",
-      choices: [
-        { name: `Resume (${remaining.length} stories left)`, value: "resume" },
-        ...(blocked > 0
-          ? [{ name: `Retry blocked stories (${blocked})`, value: "retry" }]
-          : []),
-        { name: "Cancel", value: "cancel" },
-      ],
-    },
-  ]);
+  // Confirm (skip if --yes)
+  let action: string = "resume";
+  if (!options.yes) {
+    const answer = await inquirer.prompt([
+      {
+        type: "list",
+        name: "action",
+        message: "What would you like to do?",
+        choices: [
+          { name: `Resume (${remaining.length} stories left)`, value: "resume" },
+          ...(blocked > 0
+            ? [{ name: `Retry blocked stories (${blocked})`, value: "retry" }]
+            : []),
+          { name: "Cancel", value: "cancel" },
+        ],
+      },
+    ]);
+    action = answer.action;
+  }
 
   if (action === "cancel") {
     console.log(chalk.dim("  Cancelled.\n"));
@@ -138,6 +144,7 @@ export async function resumeCommand(options: {
   // Run the pipeline — it will skip stories that are already done
   const pipeline = new AutoPipeline(config, {
     sandbox: options.sandbox !== false,
+    yes: options.yes ?? false,
     quiet: options.quiet ?? false,
     mute: options.mute ?? false,
     skipDesign: options.skipDesign ?? false,

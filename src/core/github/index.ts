@@ -16,7 +16,7 @@ export class GitHubSync {
 
   /** Check if `gh` CLI is installed and authenticated */
   static isAvailable(): boolean {
-    const result = spawnSync("gh", ["auth", "status"], { stdio: "ignore" });
+    const result = spawnSync("gh", ["auth", "status"], { stdio: "ignore", shell: true });
     return result.status === 0;
   }
 
@@ -41,7 +41,7 @@ export class GitHubSync {
         "--color", label.color,
         "--description", label.description,
         "--force",
-      ], { stdio: "ignore" });
+      ], { stdio: "ignore", shell: true });
     }
   }
 
@@ -89,7 +89,7 @@ export class GitHubSync {
       "--json", "number",
       "--jq", ".[0].number",
       "--state", "all",
-    ], { encoding: "utf-8" });
+    ], { encoding: "utf-8", shell: true });
 
     const existingNumber = searchResult.stdout?.trim();
 
@@ -114,7 +114,7 @@ export class GitHubSync {
         spawnSync("gh", [
           "issue", "close", existingNumber,
           "--repo", this.repo,
-        ], { stdio: "ignore" });
+        ], { stdio: "ignore", shell: true });
       }
 
       return "updated";

@@ -53,9 +53,23 @@ ${additions}
 export function getBuildPrompt(framework?: string): string {
   const adapter = framework ? getAdapter(framework) : null;
   const additions = adapter?.buildPromptAdditions || "";
-  const buildCmd = adapter?.buildCommand || "npm run build";
-  const lintCmd = adapter?.lintCommand || "npm run lint";
-  const typecheckCmd = adapter?.typecheckCommand || "npx tsc --noEmit";
+  const isGeneric = adapter?.id === "generic";
+
+  const verifyBlock = isGeneric
+    ? `
+AFTER WRITING CODE:
+1. Detect the project's build/lint/typecheck/test commands from its config files
+   (package.json scripts, Makefile, pyproject.toml, Cargo.toml, etc.)
+2. Run whichever commands exist — skip any that aren't configured
+3. Fix ALL errors before proceeding
+4. If no build system is configured, verify the code is syntactically valid
+`
+    : `
+AFTER WRITING CODE:
+1. Run: ${adapter?.buildCommand || "npm run build"} — fix ALL errors before proceeding
+2. Run: ${adapter?.lintCommand || "npm run lint"} — fix warnings
+3. Run: ${adapter?.typecheckCommand || "npx tsc --noEmit"} — fix type errors
+`;
 
   return `
 You are a senior fullstack developer working within the Forge development framework.
@@ -70,10 +84,7 @@ CODING STANDARDS:
 
 ${additions}
 
-AFTER WRITING CODE:
-1. Run: ${buildCmd} — fix ALL errors before proceeding
-2. Run: ${lintCmd} — fix warnings
-3. Run: ${typecheckCmd} — fix type errors
+${verifyBlock}
 
 If any command fails:
 - Read the full error output
@@ -93,10 +104,29 @@ GIT:
 /** Review system prompt — framework-aware build/lint/typecheck commands */
 export function getReviewPrompt(framework?: string): string {
   const adapter = framework ? getAdapter(framework) : null;
-  const buildCmd = adapter?.buildCommand || "npm run build";
-  const lintCmd = adapter?.lintCommand || "npm run lint";
-  const typecheckCmd = adapter?.typecheckCommand || "npx tsc --noEmit";
+  const isGeneric = adapter?.id === "generic";
   const lang = adapter?.language || "typescript";
+
+  const langCheck = isGeneric
+    ? "3. Code quality — follows the language's best practices and idioms"
+    : lang === "typescript"
+      ? "3. TypeScript strict compliance (no any, no ts-ignore, no ts-expect-error)"
+      : "3. Python code quality (no bare except, proper type hints where used)";
+
+  const runBlock = isGeneric
+    ? `
+RUN THESE COMMANDS:
+- Detect build/lint/test commands from the project's config files (package.json, Makefile, pyproject.toml, Cargo.toml, etc.)
+- Run whichever exist — skip any that aren't configured
+- Run tests if a test runner is configured
+`
+    : `
+RUN THESE COMMANDS:
+- ${adapter?.buildCommand || "npm run build"}
+- ${adapter?.lintCommand || "npm run lint"}
+- ${adapter?.typecheckCommand || "npx tsc --noEmit"}
+- npm run test (if tests exist)
+`;
 
   return `
 You are a QA engineer reviewing code within the Forge development framework.
@@ -105,7 +135,7 @@ Your job is to catch issues before code is merged to main.
 REVIEW CHECKLIST:
 1. Implementation matches the story description
 2. If design was approved — implementation matches the design
-${lang === "typescript" ? "3. TypeScript strict compliance (no any, no ts-ignore, no ts-expect-error)" : "3. Python code quality (no bare except, proper type hints where used)"}
+${langCheck}
 4. Responsive design works at 375px, 768px, 1440px
 5. Error handling — what happens when things fail?
 6. Loading states — what does the user see while waiting?
@@ -116,11 +146,7 @@ ${lang === "typescript" ? "3. TypeScript strict compliance (no any, no ts-ignore
 11. No TODO/FIXME/HACK comments left behind
 12. No hardcoded values that should be configurable
 
-RUN THESE COMMANDS:
-- ${buildCmd}
-- ${lintCmd}
-- ${typecheckCmd}
-- npm run test (if tests exist)
+${runBlock}
 
 ISSUE CLASSIFICATION:
 - MINOR: formatting, missing type annotation, unused import
@@ -141,8 +167,21 @@ Provide a structured review summary:
 /** Fix system prompt — framework-aware commands */
 export function getFixPrompt(framework?: string): string {
   const adapter = framework ? getAdapter(framework) : null;
-  const buildCmd = adapter?.buildCommand || "npm run build";
-  const typecheckCmd = adapter?.typecheckCommand || "npx tsc --noEmit";
+  const isGeneric = adapter?.id === "generic";
+
+  const verifyBlock = isGeneric
+    ? `
+AFTER EVERY FIX:
+1. Detect the project's build/test commands from its config files
+2. Run whichever exist to verify nothing is broken
+3. Verify the fix works
+`
+    : `
+AFTER EVERY FIX:
+1. Run: ${adapter?.buildCommand || "npm run build"}
+2. Run: ${adapter?.typecheckCommand || "npx tsc --noEmit"}
+3. Verify the fix works
+`;
 
   return `
 You are a debugger and problem solver within the Forge development framework.
@@ -166,10 +205,7 @@ FOR BUG FIXES:
 - Check if the same bug pattern exists elsewhere
 - Verify the fix by running the relevant command
 
-AFTER EVERY FIX:
-1. Run: ${buildCmd}
-2. Run: ${typecheckCmd}
-3. Verify the fix works
+${verifyBlock}
 
 If your fix introduces new errors, undo it and try a different approach.
 `.trim();

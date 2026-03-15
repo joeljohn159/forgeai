@@ -32,13 +32,21 @@ export class Orchestrator {
   async generatePlan(description: string): Promise<Plan> {
     const adapter = getAdapter(this.config.framework);
 
+    const isGeneric = adapter.id === "generic";
+    const frameworkHint = isGeneric
+      ? `Tech stack: Detect from the user's description below. The user may specify their own framework, language, and tools.`
+      : `Framework: ${adapter.name} (${this.config.framework})\n      Language: ${adapter.language}`;
+
     const prompt = `
       The user wants to build the following application:
       "${description}"
 
-      Framework: ${adapter.name} (${this.config.framework})
-      Language: ${adapter.language}
+      ${frameworkHint}
       Design support: ${adapter.designSupport ? "yes (Storybook)" : "no"}
+
+      IMPORTANT: If the user references any files (like .md, .txt, .pdf, or any document),
+      READ those files first to understand the full requirements before planning.
+      Also read any existing project files (package.json, requirements.txt, etc.) to understand the current state.
 
       Break this down into epics and stories. Each story should be:
       - Small enough to build in one agent session
@@ -73,17 +81,22 @@ export class Orchestrator {
         ]
       }
 
-      No explanation, just the JSON.
+      CRITICAL: Return ONLY the raw JSON object. No explanation, no markdown, no text before or after.
+      Your entire response must be a single valid JSON object starting with { and ending with }.
     `;
 
-    const resultText = await this.runQuery(prompt, { maxTurns: 3 });
+    const resultText = await this.runQuery(prompt, { maxTurns: 10 });
 
     let rawPlan: any;
     try {
       rawPlan = JSON.parse(this.cleanJson(resultText));
     } catch {
+      // Show a preview of what was returned for debugging
+      const preview = resultText.slice(0, 200).replace(/\n/g, " ");
       throw new Error(
-        "Failed to parse plan. The AI returned invalid JSON. Try again with a clearer description."
+        `Failed to parse plan — Claude returned text instead of JSON.\n` +
+        `  Preview: "${preview}${resultText.length > 200 ? "..." : ""}"\n` +
+        `  Try a more specific description, e.g.: forge auto "build a todo app with React and Express"`
       );
     }
 
@@ -228,6 +241,7 @@ export class Orchestrator {
     context: { plan: Plan; designMeta?: any; existingFiles?: string[] },
     adapter: any
   ): string {
+    const isGeneric = adapter.id === "generic";
     const designRef = context.designMeta
       ? `\nApproved design: Follow the design in stories/${story.id}.stories.tsx exactly.`
       : "";
@@ -235,6 +249,31 @@ export class Orchestrator {
     const existingRef = context.existingFiles?.length
       ? `\nExisting files to reference for patterns:\n${context.existingFiles.map((f) => `  - ${f}`).join("\n")}`
       : "";
+
+    const verifySteps = isGeneric
+      ? `
+      After writing code:
+      1. Detect the project's build/lint/typecheck commands from its config files (package.json scripts, Makefile, pyproject.toml, etc.)
+      2. Run whichever commands exist — skip any that aren't configured
+      3. Fix any errors before finishing
+      `
+      : `
+      After writing code:
+      1. Run: ${adapter.buildCommand} (fix any errors)
+      2. Run: ${adapter.lintCommand} (fix any warnings)
+      3. Run: ${adapter.typecheckCommand} (fix any type errors)
+      `;
+
+    const structureRef = isGeneric
+      ? `
+      Project structure:
+      Read the existing project files to understand the structure.
+      If starting from scratch, use the standard conventions for this tech stack.
+      `
+      : `
+      Expected project structure:
+      ${adapter.fileStructure}
+      `;
 
     return `
       Implement: "${story.title}"
@@ -244,8 +283,7 @@ export class Orchestrator {
       ${designRef}
       ${existingRef}
 
-      Expected project structure:
-      ${adapter.fileStructure}
+      ${structureRef}
 
       Technical requirements:
       - Follow existing code patterns in the project
@@ -253,10 +291,7 @@ export class Orchestrator {
       - Proper error handling
       - Responsive design (mobile-first)
 
-      After writing code:
-      1. Run: ${adapter.buildCommand} (fix any errors)
-      2. Run: ${adapter.lintCommand} (fix any warnings)
-      3. Run: ${adapter.typecheckCommand} (fix any type errors)
+      ${verifySteps}
 
       If any command fails, read the error, fix it, and re-run.
       Do NOT leave broken code.
@@ -268,6 +303,11 @@ export class Orchestrator {
     context: { plan: Plan; designMeta?: any },
     adapter: any
   ): string {
+    const isGeneric = adapter.id === "generic";
+    const runCmds = isGeneric
+      ? `Run the project's build/lint/test commands (detect from config files). Skip any that aren't configured.`
+      : `Run:\n      - ${adapter.buildCommand}\n      - ${adapter.lintCommand}\n      - ${adapter.typecheckCommand}`;
+
     return `
       Review the code for: "${story.title}"
 
@@ -282,10 +322,7 @@ export class Orchestrator {
       6. Accessibility — semantic HTML, ARIA labels
       7. No debug logs, no commented-out code, no TODOs
 
-      Run:
-      - ${adapter.buildCommand}
-      - ${adapter.lintCommand}
-      - ${adapter.typecheckCommand}
+      ${runCmds}
 
       If you find issues:
       - Minor (formatting, missing type): fix them directly
@@ -300,12 +337,17 @@ export class Orchestrator {
     context: { plan: Plan },
     adapter: any
   ): string {
+    const isGeneric = adapter.id === "generic";
+    const verifyCmds = isGeneric
+      ? "After fixing, run the project's build/test commands to verify (detect from config files)."
+      : `After fixing, run ${adapter.buildCommand} and ${adapter.typecheckCommand} to verify.`;
+
     return `
       Fix an issue in: "${story.title}"
       Framework: ${adapter.name}
 
       Make the smallest possible change. Do not refactor.
-      After fixing, run ${adapter.buildCommand} and ${adapter.typecheckCommand} to verify.
+      ${verifyCmds}
     `;
   }
 
@@ -345,35 +387,74 @@ export class Orchestrator {
   ): Promise<string> {
     let resultText = "";
 
-    for await (const msg of query({
-      prompt,
-      options: {
-        model: this.config.model,
-        systemPrompt: ORCHESTRATOR_SYSTEM_PROMPT,
-        maxTurns: opts.maxTurns,
-        allowedTools: [],
-      },
-    })) {
-      if (msg.type === "result") {
-        if ("result" in msg && typeof msg.result === "string") {
-          resultText = msg.result;
-        } else if ("errors" in msg && Array.isArray(msg.errors)) {
-          throw new Error(`Agent error: ${msg.errors.join(", ")}`);
-        }
-      }
+    try {
+      for await (const msg of query({
+        prompt,
+        options: {
+          model: this.config.model,
+          systemPrompt: ORCHESTRATOR_SYSTEM_PROMPT,
+          maxTurns: opts.maxTurns,
+          allowedTools: ["Read", "Glob", "Grep"],
+        },
+      })) {
+        if (msg.type === "result") {
+          // Check for errors first
+          const hasError = "is_error" in msg && msg.is_error;
+          const errors = "errors" in msg && Array.isArray(msg.errors) ? msg.errors : [];
+          const subtype = "subtype" in msg ? String(msg.subtype) : "";
 
-      if (msg.type === "assistant" && msg.message?.content) {
-        const textBlocks = msg.message.content
-          .filter((b: any) => b.type === "text")
-          .map((b: any) => b.text);
-        if (textBlocks.length > 0) {
-          resultText = textBlocks.join("\n");
+          if (hasError || errors.length > 0) {
+            // Build a useful error message from whatever info we have
+            const errorParts: string[] = [];
+            if (subtype) errorParts.push(subtype);
+            for (const e of errors) {
+              const eStr = typeof e === "string" ? e : JSON.stringify(e);
+              if (eStr && eStr.length > 0) errorParts.push(eStr);
+            }
+            const errorMsg = errorParts.length > 0
+              ? errorParts.join(" — ")
+              : "Unknown error from Claude. Check your auth with: claude login";
+            throw new Error(errorMsg);
+          }
+
+          if ("result" in msg && typeof msg.result === "string") {
+            resultText = msg.result;
+          }
+        }
+
+        if (msg.type === "assistant" && msg.message?.content) {
+          const textBlocks = msg.message.content
+            .filter((b: any) => b.type === "text")
+            .map((b: any) => b.text);
+          if (textBlocks.length > 0) {
+            resultText = textBlocks.join("\n");
+          }
         }
       }
+    } catch (error) {
+      // Re-throw our own errors
+      if (error instanceof Error && !error.message.includes("EPIPE") && !error.message.includes("ENOENT")) {
+        throw error;
+      }
+      // Wrap unexpected errors with more context
+      const msg = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Failed to communicate with Claude. ${msg}\n` +
+        "  Possible fixes:\n" +
+        "  1. Run: claude login\n" +
+        "  2. Check your internet connection\n" +
+        "  3. Run: forge doctor"
+      );
     }
 
     if (!resultText) {
-      throw new Error("No response from agent");
+      throw new Error(
+        "No response from Claude.\n" +
+        "  Possible fixes:\n" +
+        "  1. Run: claude login\n" +
+        "  2. Check your internet connection\n" +
+        "  3. Run: forge doctor"
+      );
     }
 
     return resultText;
@@ -392,9 +473,34 @@ export class Orchestrator {
   }
 
   private cleanJson(text: string): string {
-    return text
+    // Strip markdown fences
+    let cleaned = text
       .replace(/```json\s*/g, "")
       .replace(/```\s*/g, "")
       .trim();
+
+    // Try parsing as-is first
+    try {
+      JSON.parse(cleaned);
+      return cleaned;
+    } catch {
+      // Not valid yet — try extracting JSON object
+    }
+
+    // Extract the first { ... } block (handles text before/after JSON)
+    const firstBrace = cleaned.indexOf("{");
+    const lastBrace = cleaned.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      const extracted = cleaned.slice(firstBrace, lastBrace + 1);
+      try {
+        JSON.parse(extracted);
+        return extracted;
+      } catch {
+        // Still invalid — return extracted anyway, let caller handle the error
+        return extracted;
+      }
+    }
+
+    return cleaned;
   }
 }

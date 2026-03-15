@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="https://img.shields.io/npm/v/forgeai?style=flat-square&color=000" alt="npm version" />
+  <img src="https://img.shields.io/npm/v/forgecraft?style=flat-square&color=000" alt="npm version" />
   <img src="https://img.shields.io/badge/node-%3E%3D18-000?style=flat-square" alt="node version" />
   <img src="https://img.shields.io/github/license/joeljohn159/forgeai?style=flat-square&color=000" alt="license" />
-  <img src="https://img.shields.io/badge/frameworks-Next.js%20%7C%20React%20%7C%20Django-000?style=flat-square" alt="frameworks" />
+  <img src="https://img.shields.io/badge/frameworks-Next.js%20%7C%20React%20%7C%20Django%20%7C%20Any-000?style=flat-square" alt="frameworks" />
 </p>
 
 <h1 align="center">ForgeAI</h1>
@@ -97,16 +97,25 @@ Each phase has a clear input, a clear output, and a gate between them. Stories t
 # Prerequisites: Node 18+, Claude Code CLI (logged in)
 
 # Install globally
-npm install -g forgeai
+npm install -g forgecraft
 
 # Create a new project directory
 mkdir my-app && cd my-app
 
-# Initialize (choose Next.js, React+Vite, or Django)
+# Initialize (choose Next.js, React+Vite, Django, or any stack)
 forge init
 
 # Build something
 forge auto "a task management app with projects, due dates, and team assignment"
+
+# Full auto — skip all prompts
+forge auto "an API with Express and MongoDB" --yes
+
+# Attach references — drag & drop files into the terminal
+forge auto "build this app" /path/to/mockup.png /path/to/spec.pdf
+#  Attachments:
+#    [Image1] mockup.png
+#    [Document1] spec.pdf
 
 # Start the dev server
 forge start
@@ -114,7 +123,7 @@ forge start
 # If interrupted, resume where you left off
 forge resume
 
-# Fix a bug (supports screenshots)
+# Fix a bug (drag & drop screenshots or use --image)
 forge fix "the sidebar overlaps on mobile" --image screenshot.png
 
 # Push to GitHub manually (auto-push happens after forge auto)
@@ -150,6 +159,32 @@ Type a message at any point during the build. It gets queued and processed at th
 "what's the database schema?"         → Orchestrator answers directly
 ```
 
+### Drag & Drop Attachments
+Drag files directly into the terminal to attach mockups, specs, or screenshots. Forge detects the file paths, classifies them, and passes them to the agents as context.
+
+```bash
+# Drag & drop images and documents right into your prompt
+forge auto "build this landing page" /Users/me/mockup.png /Users/me/requirements.pdf
+
+  Attachments:
+    [Image1] mockup.png
+    [Document1] requirements.pdf
+
+# Also works with forge fix
+forge fix "match this design" /Users/me/screenshot.png
+```
+
+Supports images (`.png`, `.jpg`, `.svg`, `.webp`), documents (`.pdf`, `.doc`, `.txt`, `.md`, `.csv`, `.json`, `.yaml`), and design files (`.figma`, `.sketch`). Files are copied to `.forge/attachments/` so agents can reference them.
+
+### Zero-Prompt Mode (`--yes`)
+Skip every confirmation dialog — Claude Code permission prompts, review gates, resume confirmations. Fully hands-free.
+
+```bash
+forge auto "a blog with auth" --yes
+forge auto "a dashboard" -y --skip-design --quiet
+forge resume -y
+```
+
 ### Screenshot-Based Bug Fixing
 Pass a screenshot to `forge fix` and Claude reads the image to understand the visual issue:
 
@@ -183,9 +218,18 @@ ForgeAI isn't locked to one framework. Each adapter knows how to scaffold, build
 | **Next.js** | TypeScript | Storybook | Stable |
 | **React + Vite** | TypeScript | Storybook | Stable |
 | **Django** | Python | Skipped | Stable |
-| Flutter | Dart | — | Planned |
+| **Any Stack** | Auto-detect | Skipped | Stable |
 
-Worker prompts automatically adapt to the framework — Next.js gets App Router instructions, Vite gets SPA routing, Django gets migration commands.
+The **"Other"** option in `forge init` enables a generic adapter that works with any tech stack — Express, Vue, Svelte, Go, Rust, FastAPI, Flutter, Rails, and more. The agent auto-detects your project's language, package manager, build commands, and file structure from existing config files. If starting from scratch, it scaffolds using the standard tooling for the detected stack.
+
+```bash
+# Works with anything
+forge auto "a REST API with Express, Prisma, and PostgreSQL"
+forge auto "a CLI tool in Rust that converts images to WebP"
+forge auto "a FastAPI backend with SQLAlchemy and JWT auth"
+```
+
+Worker prompts automatically adapt to the framework — Next.js gets App Router instructions, Vite gets SPA routing, Django gets migration commands, and generic projects get smart auto-detection.
 
 ### Sprint Resume
 If a build gets interrupted (auth expires, network drops, you close the terminal), your progress is saved. Run `forge resume` to pick up exactly where you left off. Blocked stories can be retried.
@@ -201,10 +245,12 @@ Pass `--deploy` and ForgeAI configures `next.config` for static export and creat
 
 ```bash
 forge auto "description"              # Full autonomous pipeline (auto-pushes to GitHub)
+forge auto "description" --yes        # Skip all prompts (fully hands-free)
 forge auto "description" --skip-design  # Skip Storybook previews (faster)
 forge auto "description" --deploy     # Add GitHub Pages deployment
 forge auto "description" --mute       # No notification sounds
 forge auto "description" --quiet      # Spinners only, no tool details
+forge auto "desc" file.png spec.pdf   # Attach reference files (drag & drop)
 ```
 
 ### Step-by-Step Mode
@@ -286,6 +332,7 @@ src/
 │   │   ├── nextjs.ts                 # Next.js adapter
 │   │   ├── react-vite.ts             # React + Vite adapter
 │   │   ├── django.ts                 # Django adapter
+│   │   ├── generic.ts                # Generic adapter (any tech stack)
 │   │   └── index.ts                  # Adapter registry + factory
 │   │
 │   ├── git/
@@ -295,6 +342,7 @@ src/
 │   │   └── index.ts                  # GitHub Issues sync (via gh CLI)
 │   │
 │   └── utils/
+│       ├── attachments.ts            # Drag & drop file attachment parser
 │       ├── config.ts                 # Config validation
 │       └── sound.ts                  # Notification sounds (macOS/Linux/fallback)
 │
@@ -379,9 +427,10 @@ After `forge init`, your `forge.config.json` controls:
 | Git strategy | Manual | Manual | Manual | **Auto commits + tags + push** |
 | Parallelism | N/A | N/A | N/A | **Dependency-grouped parallel** |
 | Human oversight | Full control | None | Approve/reject | **Stage gates + live feedback** |
-| Bug fix with screenshots | N/A | N/A | N/A | **forge fix --image** |
+| Bug fix with screenshots | N/A | N/A | N/A | **forge fix --image + drag & drop** |
 | SEO & assets | You remember | You remember | You remember | **Built-in defaults** |
-| Multi-framework | N/A | Any | Any | **Next.js, React, Django** |
+| Multi-framework | N/A | Any | Any | **Next.js, React, Django, Any** |
+| File attachments | N/A | N/A | N/A | **Drag & drop mockups/specs** |
 | Resume on failure | Start over | N/A | N/A | **Auto-save + resume** |
 
 <br/>
@@ -394,7 +443,7 @@ After `forge init`, your `forge.config.json` controls:
 
 **v0.3** — React + Vite and Django adapters, `forge map`, `forge resume`
 
-**v1.0** — Current
+**v1.0** — Initial Release
 - 21 CLI commands covering the full development lifecycle
 - 3 framework adapters (Next.js, React + Vite, Django)
 - Framework-aware prompts via pluggable adapter system
@@ -406,10 +455,13 @@ After `forge init`, your `forge.config.json` controls:
 - Config validation with actionable error messages
 - Token expiry handling with auto-retry
 
-**v1.1** — Next Up
-- **Flutter adapter** — Dart support with widget-based design previews
-- **Vue.js / Nuxt adapter** — Vue 3 + Composition API + Nuxt 3 SSR support
-- **Svelte / SvelteKit adapter** — Svelte 5 with runes and SvelteKit routing
+**v1.1** — Current
+- **Any tech stack support** — generic adapter auto-detects language, package manager, build commands, and project structure. Works with Express, Vue, Svelte, Go, Rust, FastAPI, Rails, and more.
+- **`--yes` flag** — skip all confirmation prompts for fully hands-free operation
+- **Drag & drop attachments** — attach mockups, screenshots, specs, and design files by dragging into the terminal. Supports images, PDFs, docs, and design files.
+- Published as `forgecraft` on npm
+
+**v1.2** — Next Up
 - **Test generation phase** — auto-generate unit and integration tests after build (Vitest, pytest, Flutter test)
 - **Custom adapter plugin API** — drop a JS file in `.forge/adapters/` to add your own framework
 

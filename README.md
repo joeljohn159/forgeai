@@ -1,139 +1,370 @@
-# ⚡ Forge
+<p align="center">
+  <img src="https://img.shields.io/npm/v/forgeai?style=flat-square&color=000" alt="npm version" />
+  <img src="https://img.shields.io/badge/node-%3E%3D18-000?style=flat-square" alt="node version" />
+  <img src="https://img.shields.io/github/license/joeljohn159/forgeai?style=flat-square&color=000" alt="license" />
+  <img src="https://img.shields.io/badge/framework-Next.js-000?style=flat-square" alt="framework" />
+</p>
 
-**AI Development Orchestration Framework**
+<h1 align="center">ForgeAI</h1>
 
-Forge transforms AI-assisted development from a flat chat loop into a structured, multi-agent Agile pipeline. Plan, design, build, and review software with AI agents — with human oversight at every stage.
+<p align="center">
+  <strong>Ship production apps from a single sentence.</strong><br/>
+  An AI orchestration framework that plans, designs, builds, and reviews software<br/>using a structured multi-agent pipeline — not a chat window.
+</p>
 
-## Why Forge?
+<br/>
 
-| Without Forge | With Forge |
-|---|---|
-| "Build me a login page" → "No, change that" → "Not like that" | Structured pipeline: plan → design → build → review |
-| One agent, you manage everything | Orchestrator + Worker, automated coordination |
-| Code first, fix later | See designs before any code is written |
-| Manual Git branch juggling | Automated branch-per-story strategy |
-| Generic AI-looking output | Curated design references, mobile-first |
-| No project tracking | Sprint state tracked in Git |
+```
+$ forge auto "a personal finance tracker with budget categories, expense logging, and monthly reports"
+
+  forge auto
+  sandbox on · type a message anytime to queue feedback
+
+  [0:03] Plan ready
+
+  Personal Finance Tracker · nextjs
+  12 stories across 4 epics
+
+  Layout & Navigation
+    [full] App shell with sidebar navigation
+    [full] Dashboard landing page
+  Expense Management
+    [full] Add expense form with categories
+    [full] Expense list with filters
+    [ui]   Category management page
+  Budget Tracking
+    [full] Budget setup per category
+    [ui]   Budget vs actual progress bars
+    [full] Budget alerts and notifications
+  Reports
+    [ui]   Monthly expense breakdown chart
+    [ui]   Category pie chart
+    [full] Export to CSV
+    [full] Date range selector
+
+  Build · 12 stories
+
+  [0:15] [1/12] App shell with sidebar navigation · 8 files  2.1k in / 18.4k out
+  [0:48] [2/12] Dashboard landing page · 4 files              1.8k in / 12.1k out
+  [1:22] parallel: Add expense form, Category management
+  [2:01] [3/12] Add expense form with categories · 6 files    2.4k in / 21.0k out
+  [2:01] [4/12] Category management page · 3 files            1.2k in / 9.8k out
+  ...
+
+  ─────────────────────────────────
+  Done in 14m 23s · 12/12 stories
+  28.4k in / 198.2k out
+```
+
+<br/>
+
+---
+
+<br/>
+
+## The Problem
+
+Every AI coding tool today works the same way: you type into a chat, the AI writes some code, you paste it in, something breaks, you go back and forth. There is no structure, no planning, no design phase, no review. You are the project manager, the QA engineer, and the glue holding it all together.
+
+ForgeAI replaces that entire loop.
+
+<br/>
+
+## How It Works
+
+ForgeAI runs a complete software development pipeline autonomously. One command, five phases, zero copy-pasting.
+
+```
+ PLAN            DESIGN           BUILD            REVIEW           SHIP
+ ────            ──────           ─────            ──────           ────
+ Break into      Generate         Implement        QA check         Tag, merge,
+ epics &         Storybook        each story       each story,      deploy
+ stories         previews         with full        auto-fix
+                                  CLI power        minor issues
+
+ Orchestrator    Worker           Worker           Worker           Git
+ Agent           (design mode)    (build mode)     (review mode)    Manager
+```
+
+Each phase has a clear input, a clear output, and a gate between them. Stories that don't depend on each other build **in parallel**. The whole thing runs on `main` with per-story commits and tags for easy rollback.
+
+<br/>
 
 ## Quick Start
 
 ```bash
-# Install
-npm install -g forge-ai
+# Prerequisites: Node 18+, Claude Code CLI (logged in)
 
-# Initialize in your project
+# Install globally
+npm install -g forgeai
+
+# Create a new project directory
+mkdir my-app && cd my-app
+
+# Initialize
 forge init
 
-# Run a full sprint
-forge sprint "Build a church finance app with donation tracking, 
-              budget management, and financial reports"
+# Build something
+forge auto "a task management app with projects, due dates, and team assignment"
 ```
 
-## How It Works
+That's it. Come back in 15 minutes to a working Next.js app with proper TypeScript, Tailwind CSS, responsive design, SEO metadata, favicons, and a README.
+
+<br/>
+
+## Features
+
+### Structured Pipeline, Not a Chat
+Every project goes through Plan, Design, Build, Review. Each phase has specialized prompts, tool permissions, and quality gates. The AI doesn't just write code — it writes code that builds, lints, and type-checks before moving on.
+
+### Two-Agent Architecture
+Instead of one monolithic agent or a swarm of disconnected ones, ForgeAI uses two:
+
+- **Orchestrator** — The tech lead. Plans the sprint, crafts detailed prompts for each story, routes your feedback, reviews output. Never touches code.
+- **Worker** — The engineer. Same agent, four modes (`design`, `build`, `review`, `fix`), each with different system prompts and tool permissions. Preserves context across the entire build.
+
+### Parallel Execution
+Stories are grouped by dependency. Independent stories build concurrently using `Promise.all`, cutting total build time significantly. A 12-story app that takes 45 minutes sequentially finishes in ~15 minutes.
+
+### Live Feedback Loop
+Type a message at any point during the build. It gets queued and processed at the next safe point between stories. The Orchestrator classifies your input and routes it:
 
 ```
-You describe what you want
-        │
-        ▼
-   📋 PLAN ──────── Orchestrator breaks it into epics & stories
-        │            You review and approve the plan
-        ▼
-   🎨 DESIGN ────── Worker generates Storybook previews
-        │            You review designs in the browser
-        │            Mobile + desktop, iterate until happy
-        ▼
-   🔧 BUILD ─────── Worker implements each story on its own branch
-        │            Full Claude Code power: writes, runs, self-heals
-        ▼
-   🔍 REVIEW ────── Worker reviews code quality, runs tests
-        │            Auto-fixes minor issues, merges to main
-        ▼
-   🎉 SHIP ──────── Working app on localhost, tagged in Git
+"make the header sticky"              → Worker fix mode
+"redesign the settings page"          → Worker design mode → build mode
+"the API returns 404 on /expenses"    → Worker fix mode (debug)
+"add a dark mode toggle"              → New story added to sprint
+"what's the database schema?"         → Orchestrator answers directly
 ```
+
+### Safety Caps
+Each worker mode has a maximum turn limit (`design: 30`, `build: 50`, `review: 20`, `fix: 15`). If an agent gets stuck in a loop, it stops gracefully instead of burning through your usage.
+
+### Review Gate
+After the build phase completes, ForgeAI pauses and plays a notification sound. You choose: continue to review, skip review, or abort. You're always in control.
+
+### Production Defaults
+Every project gets the things most AI tools forget:
+- `favicon.ico`, `icon.svg`, `apple-touch-icon.png`
+- Open Graph image (`og.png`) for social sharing
+- Complete metadata — title, description, OG tags, Twitter cards
+- `robots.txt`, `sitemap.xml`, `manifest.json`
+- `next/image` for all images
+- Auto-generated `README.md` based on what was actually built
+
+### Optional GitHub Pages Deploy
+Pass `--deploy` and ForgeAI configures `next.config` for static export and creates a GitHub Actions workflow for automatic deployment.
+
+<br/>
 
 ## Commands
 
-| Command | Description |
-|---|---|
-| `forge init` | Set up Forge in your project |
-| `forge plan "description"` | Generate a sprint plan |
-| `forge design` | Generate & review design previews |
-| `forge build` | Build stories one by one |
-| `forge review` | Run QA review on built stories |
-| `forge sprint "description"` | Run the full pipeline |
-| `forge status` | Show sprint progress |
-| `forge fix "description"` | Fix a bug or make a change |
-| `forge undo` | Revert the last action |
-
-## The Two-Agent Model
-
-Forge uses two agents instead of many, minimizing context loss:
-
-**Orchestrator** — The project manager. Plans, routes, reviews. Never writes code.
-
-**Worker** — The engineer. Same agent, four modes:
-
-| Mode | What it does |
-|---|---|
-| `design` | Generates Storybook component previews |
-| `build` | Implements features with full CLI power |
-| `review` | Checks quality, runs tests |
-| `fix` | Debugs and patches issues |
-
-## Talk to the Orchestrator Anytime
-
-Mid-sprint, just type what you need:
+### Autonomous Mode (recommended)
 
 ```bash
-> make the button green          # → Worker fix mode (visual tweak)
-> redesign the dashboard         # → Worker design mode (new mockup)
-> login page shows blank screen  # → Worker fix mode (debug)
-> add recurring donations        # → New story added to sprint
-> what database schema are we using?  # → Orchestrator answers directly
+forge auto "description"              # Full autonomous pipeline
+forge auto "description" --skip-design  # Skip Storybook previews (faster)
+forge auto "description" --deploy     # Add GitHub Pages deployment
+forge auto "description" --mute       # No notification sounds
+forge auto "description" --quiet      # Spinners only, no tool details
 ```
 
-Changes are queued and applied at safe points between stories.
+### Step-by-Step Mode
 
-## State Management
+```bash
+forge init                            # Initialize ForgeAI in current directory
+forge plan "description"              # Generate sprint plan
+forge design                          # Generate Storybook design previews
+forge build                           # Build stories sequentially
+forge review                          # Run QA review on built stories
+forge sprint "description"            # Run full pipeline with human gates
+```
 
-All state lives in `.forge/` inside your repo:
+### Utilities
+
+```bash
+forge status                          # Show current sprint progress
+forge fix "description"               # Fix a bug or make a small change
+forge undo                            # Revert the last agent action
+```
+
+<br/>
+
+## Architecture
+
+```
+src/
+├── cli/
+│   ├── index.ts                      # CLI entry point (commander)
+│   └── commands/
+│       ├── auto.ts                   # forge auto — autonomous mode
+│       ├── init.ts                   # forge init
+│       ├── plan.ts                   # forge plan
+│       ├── design.ts                 # forge design
+│       ├── build.ts                  # forge build
+│       ├── review.ts                 # forge review
+│       ├── sprint.ts                 # forge sprint
+│       ├── status.ts                 # forge status
+│       ├── fix.ts                    # forge fix
+│       └── undo.ts                   # forge undo
+│
+├── core/
+│   ├── orchestrator/
+│   │   ├── index.ts                  # Orchestrator agent — plans, routes, reviews
+│   │   └── prompts.ts                # Orchestrator system prompt
+│   │
+│   ├── worker/
+│   │   ├── index.ts                  # Worker agent — executes in 4 modes
+│   │   └── prompts/
+│   │       └── index.ts              # Mode-specific system prompts
+│   │
+│   ├── pipeline/
+│   │   ├── index.ts                  # Step-by-step pipeline
+│   │   └── auto.ts                   # Autonomous pipeline (parallel, timer, gates)
+│   │
+│   ├── git/
+│   │   └── index.ts                  # Git operations (branch, commit, tag, merge)
+│   │
+│   └── utils/
+│       └── sound.ts                  # Notification sounds (macOS/Linux/fallback)
+│
+├── state/
+│   └── index.ts                      # State manager (.forge/ directory)
+│
+└── types/
+    └── plan.ts                       # TypeScript types for the entire system
+```
+
+<br/>
+
+## State & Git
+
+ForgeAI tracks everything in a `.forge/` directory inside your repo:
 
 ```
 .forge/
-├── plan.json       # Epics, stories, status
-├── state.json      # Current phase, queue, history
-├── snapshots/      # Pre-action snapshots for undo
-└── designs/        # Design approval metadata
+├── plan.json                         # Epics, stories, status, dependencies
+├── state.json                        # Current phase, queue, history
+├── config.json                       # Framework, model, preferences
+├── snapshots/                        # Pre-action snapshots for undo
+└── designs/                          # Design approval metadata
 ```
 
-Since it's in Git, it's versioned, backed up, and synced for free.
-
-## Git Strategy
-
-Every story gets its own branch. Every milestone gets a tag:
+Every story gets a commit. Every milestone gets a tag:
 
 ```
-main ────●────●────●────●──── HEAD
-         │    │    │    │
-         │    │    │    └── forge/v0.4-dashboard
-         │    │    └── forge/v0.3-auth-api
-         │    └── forge/v0.2-auth-signup
+main ────●────●────●────●────●────●──── HEAD
+         │    │    │    │    │    │
+         │    │    │    │    │    └── forge/v0.6-export-csv
+         │    │    │    │    └── forge/v0.5-budget-alerts
+         │    │    │    └── forge/v0.4-budget-setup
+         │    │    └── forge/v0.3-expense-list
+         │    └── forge/v0.2-add-expense
          └── forge/v0.1-designs
 ```
 
+Roll back to any point with `git checkout forge/v0.3-expense-list`.
+
+<br/>
+
 ## Requirements
 
-- Node.js 18+
-- Claude Code CLI (authenticated)
-- Git
+| Requirement | Details |
+|-------------|---------|
+| **Node.js** | v18 or higher |
+| **Claude Code** | Installed and logged in (`npm i -g @anthropic-ai/claude-code && claude login`) |
+| **Git** | Any recent version |
+| **Subscription** | Claude Max, Team, or Enterprise |
+
+ForgeAI uses the Claude Agent SDK which authenticates through your Claude Code session. No separate API key needed.
+
+<br/>
+
+## Configuration
+
+After `forge init`, your `forge.config.json` controls:
+
+```json
+{
+  "framework": "nextjs",
+  "model": "sonnet",
+  "designPreview": "storybook",
+  "autoCommit": true,
+  "storybook": {
+    "port": 6006
+  }
+}
+```
+
+<br/>
+
+## Comparison
+
+| | ChatGPT / Claude Chat | GitHub Copilot | Cursor | **ForgeAI** |
+|---|---|---|---|---|
+| Planning | Manual | None | None | **Automated sprint planning** |
+| Design preview | None | None | None | **Storybook generation** |
+| Build | Copy-paste | Autocomplete | Inline edit | **Full autonomous build** |
+| Review | Manual | None | None | **Automated QA + auto-fix** |
+| Git strategy | Manual | Manual | Manual | **Automated commits + tags** |
+| Parallelism | N/A | N/A | N/A | **Dependency-grouped parallel** |
+| Human oversight | Full control | None | Approve/reject | **Stage gates + live feedback** |
+| SEO & assets | You remember | You remember | You remember | **Built-in defaults** |
+
+<br/>
 
 ## Roadmap
 
-- **v0.1** — Core pipeline, 2-agent model, Next.js support
-- **v0.2** — Undo/history, GitHub sync, design import
-- **v0.3** — React/Django adapters, Git map visualization
-- **v1.0** — Parallel agents, plugin system, CI/CD integration
+**v0.1** — Current
+- Two-agent pipeline (Orchestrator + Worker)
+- Autonomous mode with parallel execution
+- Next.js support
+- Review gates, safety caps, live feedback
+- SEO, assets, README generation
+- GitHub Pages deployment
+
+**v0.2**
+- `forge undo` with file-level rollback
+- `forge history` with version timeline
+- Design import from Figma/screenshots
+- GitHub Issues/Projects sync
+
+**v0.3**
+- React (Vite) adapter
+- Django adapter
+- `forge map` — Git visualization in browser
+- Web dashboard
+
+**v1.0**
+- Multiple LLM providers
+- Plugin system for custom adapters
+- CI/CD integration
+- Team collaboration
+
+<br/>
+
+## Contributing
+
+```bash
+git clone https://github.com/joeljohn159/forgeai.git
+cd forgeai
+npm install
+npm run build
+npm link                              # Makes 'forge' available globally
+```
+
+Make changes in `src/`, then `npm run build` to test.
+
+<br/>
 
 ## License
 
 MIT
+
+<br/>
+
+---
+
+<p align="center">
+  Built by <a href="https://github.com/joeljohn159">Joel John</a>
+</p>

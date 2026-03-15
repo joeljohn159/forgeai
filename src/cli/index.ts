@@ -27,6 +27,7 @@ import { templateCommand } from "./commands/template.js";
 import { estimateCommand } from "./commands/estimate.js";
 import { cicdCommand } from "./commands/cicd.js";
 import { vizCommand } from "./commands/viz.js";
+import { claudeCommand } from "./commands/claude.js";
 
 const program = new Command();
 
@@ -118,6 +119,11 @@ program
   .command("push")
   .description("Push project to GitHub (commits + tags)")
   .action(pushCommand);
+
+program
+  .command("claude")
+  .description("Launch Claude Code CLI in the current project")
+  .action(claudeCommand);
 
 // ── Utilities ────────────────────────────────────────────
 

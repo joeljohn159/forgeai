@@ -283,6 +283,7 @@ forge sprint "description"            # Run full pipeline with human gates
 ```bash
 forge start                           # Start the dev server (auto-detects framework)
 forge push                            # Push commits + tags to GitHub
+forge claude                          # Launch Claude Code CLI in the current project
 ```
 
 ### Visualizer & Insights

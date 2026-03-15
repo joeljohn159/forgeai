@@ -210,7 +210,7 @@ export class Orchestrator {
     context: { plan: Plan },
     adapter: any
   ): string {
-    const refsDir = ".forge/designs/references";
+    const refsDir = [".forge", "designs", "references"].join("/");
 
     return `
       You are designing the UI for: "${story.title}"
@@ -475,8 +475,10 @@ export class Orchestrator {
   }
 
   private cleanJson(text: string): string {
-    // Strip markdown fences
+    // Normalize Windows line endings and strip markdown fences
     let cleaned = text
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
       .replace(/```json\s*/g, "")
       .replace(/```\s*/g, "")
       .trim();

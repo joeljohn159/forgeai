@@ -30,17 +30,27 @@ export async function fixCommand(description: string, options?: { image?: string
     return;
   }
 
-  // Validate image path if provided
-  if (options?.image && !existsSync(options.image)) {
-    console.log(chalk.red(`\n  Image not found: ${options.image}\n`));
-    return;
+  // Validate image path if provided — resolve to absolute for cross-platform
+  if (options?.image) {
+    const { resolve } = await import("path");
+    const imgPath = resolve(options.image);
+    if (!existsSync(imgPath)) {
+      console.log(chalk.red(`\n  Image not found: ${options.image}\n`));
+      return;
+    }
+    options.image = imgPath;
   }
 
   // Parse attachments from description (drag-and-drop file paths)
-  const parsed = parseAttachments(description);
-  if (parsed.attachments.length > 0) {
-    description = parsed.description;
-    stageAttachments(parsed.attachments);
+  let parsed = { description, attachments: [] as any[] };
+  try {
+    parsed = parseAttachments(description);
+    if (parsed.attachments.length > 0) {
+      description = parsed.description;
+      stageAttachments(parsed.attachments);
+    }
+  } catch {
+    // Attachment parsing failed — continue with raw description
   }
 
   console.log(chalk.bold("\n  forge fix\n"));
@@ -57,7 +67,14 @@ export async function fixCommand(description: string, options?: { image?: string
   const orchestrator = new Orchestrator(config);
   const worker = new Worker(config, {});
   const git = new GitManager();
-  const state = await stateManager.getState();
+
+  let state;
+  try {
+    state = await stateManager.getState();
+  } catch {
+    // State file missing or corrupted — use empty state
+    state = { currentPhase: "init" as const, currentStory: null, workerMode: null, queue: [], history: [] };
+  }
 
   // ── Orchestrator classifies the request ─────────────────
   const spinner = ora({ text: "Analyzing request...", indent: 2 }).start();
@@ -66,9 +83,16 @@ export async function fixCommand(description: string, options?: { image?: string
   try {
     decision = await orchestrator.routeUserInput(description, state);
   } catch (err) {
-    spinner.fail("Failed to analyze request");
-    console.log(chalk.red(`  ${err instanceof Error ? err.message : err}`));
-    return;
+    // Handle JSON parse errors from orchestrator (common on Windows)
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (errMsg.includes("JSON") || errMsg.includes("parse") || errMsg.includes("Unexpected token")) {
+      spinner.warn("AI response parsing failed — falling back to direct fix mode");
+      decision = { action: "route-to-worker" as const, workerMode: "fix" as const, prompt: description };
+    } else {
+      spinner.fail("Failed to analyze request");
+      console.log(chalk.red(`  ${errMsg}`));
+      return;
+    }
   }
 
   switch (decision.action) {
@@ -130,30 +154,33 @@ export async function fixCommand(description: string, options?: { image?: string
     case "add-story": {
       spinner.succeed("New feature detected");
 
-      const plan = await stateManager.getPlan();
-      if (plan && plan.epics.length > 0) {
-        const newStory = {
-          id: `story-${Date.now()}`,
-          title: decision.story?.title || description,
-          description: decision.story?.description || description,
-          type: (decision.story?.type as any) || "fullstack",
-          status: "planned" as const,
-          branch: null,
-          designApproved: false,
-          tags: [],
-          priority: 99,
-          dependencies: [],
-        };
+      try {
+        const plan = await stateManager.getPlan();
+        if (plan && plan.epics.length > 0) {
+          const newStory = {
+            id: `story-${Date.now()}`,
+            title: decision.story?.title || description,
+            description: decision.story?.description || description,
+            type: (decision.story?.type as any) || "fullstack",
+            status: "planned" as const,
+            branch: null,
+            designApproved: false,
+            tags: [],
+            priority: 99,
+            dependencies: [],
+          };
 
-        // Add to last epic
-        plan.epics[plan.epics.length - 1].stories.push(newStory);
-        await stateManager.savePlan(plan);
-        await git.commitAll(`forge: add story "${newStory.title}"`);
+          plan.epics[plan.epics.length - 1].stories.push(newStory);
+          await stateManager.savePlan(plan);
+          await git.commitAll(`forge: add story "${newStory.title}"`);
 
-        console.log(chalk.green(`  Added: ${newStory.title}`));
-        console.log(chalk.dim(`  Run ${chalk.white("forge build")} or ${chalk.white("forge auto")} to build it.\n`));
-      } else {
-        console.log(chalk.yellow("  No plan found. Run forge plan first to create a sprint plan.\n"));
+          console.log(chalk.green(`  Added: ${newStory.title}`));
+          console.log(chalk.dim(`  Run ${chalk.white("forge build")} or ${chalk.white("forge auto")} to build it.\n`));
+        } else {
+          console.log(chalk.yellow("  No plan found. Run forge plan first to create a sprint plan.\n"));
+        }
+      } catch (err) {
+        console.log(chalk.red(`  Failed to add story: ${err instanceof Error ? err.message : err}\n`));
       }
       break;
     }

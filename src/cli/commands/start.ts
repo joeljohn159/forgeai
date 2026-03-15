@@ -1,56 +1,59 @@
 // ============================================================
 // forge start — Start the dev server for the current project
-// Auto-detects framework from forge.config.json
+// Auto-detects framework from forge.config.json or project files
+// Works cross-platform (macOS, Linux, Windows)
 // ============================================================
 
 import chalk from "chalk";
 import { spawn } from "child_process";
+import { existsSync, readFileSync } from "fs";
+import path from "path";
 import { stateManager } from "../../state/index.js";
 import { getAdapter, refreshAdapters } from "../../core/adapters/index.js";
 
 export async function startCommand() {
+  console.log(chalk.bold("\n  forge") + chalk.dim(" start\n"));
+
+  let devCommand: string | null = null;
+  let label = "Project";
+
+  // Try forge config first
   const config = await stateManager.getConfig();
-  if (!config) {
-    console.log(chalk.red("\n  Forge not initialized. Run: forge init\n"));
-    return;
-  }
-
-  await refreshAdapters();
-  const adapter = getAdapter(config.framework);
-  let devCommand = adapter.devCommand;
-
-  // For generic adapter, try to detect the dev command from package.json
-  if (adapter.id === "generic") {
+  if (config) {
     try {
-      const { readFileSync } = await import("fs");
-      const pkg = JSON.parse(readFileSync("package.json", "utf-8"));
-      if (pkg.scripts?.dev) {
-        devCommand = "npm run dev";
-      } else if (pkg.scripts?.start) {
-        devCommand = "npm start";
-      } else if (pkg.scripts?.serve) {
-        devCommand = "npm run serve";
-      }
+      await refreshAdapters();
+      const adapter = getAdapter(config.framework);
+      devCommand = adapter.devCommand;
+      label = adapter.id === "generic" ? "Custom stack" : adapter.name;
     } catch {
-      // No package.json — try common alternatives
-      const { existsSync } = await import("fs");
-      if (existsSync("manage.py")) {
-        devCommand = "python manage.py runserver";
-      } else if (existsSync("Cargo.toml")) {
-        devCommand = "cargo run";
-      } else if (existsSync("go.mod")) {
-        devCommand = "go run .";
-      }
+      // Adapter loading failed — fall through to auto-detect
     }
   }
 
-  const [cmd, ...args] = devCommand.split(" ");
+  // Auto-detect from project files if no adapter or generic
+  if (!devCommand || devCommand === "npm run dev") {
+    devCommand = detectDevCommand();
+    if (!config) {
+      label = detectProjectType();
+    }
+  }
 
-  console.log(chalk.bold("\n  forge") + chalk.dim(" start"));
-  console.log(chalk.dim(`  ${adapter.id === "generic" ? "Custom stack" : adapter.name} dev server\n`));
+  if (!devCommand) {
+    console.log(chalk.red("  Could not detect how to start this project.\n"));
+    console.log(chalk.dim("  Expected one of:"));
+    console.log(chalk.dim("    - package.json with dev/start/serve script"));
+    console.log(chalk.dim("    - manage.py (Django)"));
+    console.log(chalk.dim("    - Cargo.toml (Rust)"));
+    console.log(chalk.dim("    - go.mod (Go)"));
+    console.log(chalk.dim("    - pubspec.yaml (Flutter)\n"));
+    return;
+  }
+
+  console.log(chalk.dim(`  ${label} dev server`));
   console.log(chalk.dim(`  Running: ${devCommand}\n`));
 
-  const child = spawn(cmd, args, {
+  // Use shell on all platforms for consistent command resolution
+  const child = spawn(devCommand, {
     cwd: process.cwd(),
     stdio: "inherit",
     shell: true,
@@ -66,4 +69,62 @@ export async function startCommand() {
       console.log(chalk.red(`\n  Dev server exited with code ${code}\n`));
     }
   });
+}
+
+function detectDevCommand(): string | null {
+  const pkgPath = path.join(process.cwd(), "package.json");
+
+  if (existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+      const scripts = pkg.scripts || {};
+
+      if (scripts.dev) return "npm run dev";
+      if (scripts.start) return "npm start";
+      if (scripts.serve) return "npm run serve";
+    } catch {
+      // Malformed package.json — continue detection
+    }
+  }
+
+  // Python / Django
+  if (existsSync(path.join(process.cwd(), "manage.py"))) {
+    return "python manage.py runserver";
+  }
+
+  // Rust
+  if (existsSync(path.join(process.cwd(), "Cargo.toml"))) {
+    return "cargo run";
+  }
+
+  // Go
+  if (existsSync(path.join(process.cwd(), "go.mod"))) {
+    return "go run .";
+  }
+
+  // Flutter
+  if (existsSync(path.join(process.cwd(), "pubspec.yaml"))) {
+    return "flutter run";
+  }
+
+  // Ruby / Rails
+  if (existsSync(path.join(process.cwd(), "Gemfile"))) {
+    if (existsSync(path.join(process.cwd(), "bin", "rails"))) {
+      return "bundle exec rails server";
+    }
+    return "bundle exec ruby app.rb";
+  }
+
+  return null;
+}
+
+function detectProjectType(): string {
+  if (existsSync(path.join(process.cwd(), "next.config.ts")) || existsSync(path.join(process.cwd(), "next.config.js")) || existsSync(path.join(process.cwd(), "next.config.mjs"))) return "Next.js";
+  if (existsSync(path.join(process.cwd(), "nuxt.config.ts"))) return "Nuxt";
+  if (existsSync(path.join(process.cwd(), "svelte.config.js"))) return "SvelteKit";
+  if (existsSync(path.join(process.cwd(), "manage.py"))) return "Django";
+  if (existsSync(path.join(process.cwd(), "Cargo.toml"))) return "Rust";
+  if (existsSync(path.join(process.cwd(), "go.mod"))) return "Go";
+  if (existsSync(path.join(process.cwd(), "pubspec.yaml"))) return "Flutter";
+  return "Project";
 }

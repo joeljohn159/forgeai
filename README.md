@@ -8,8 +8,8 @@
 <h1 align="center">ForgeAI</h1>
 
 <p align="center">
-  <strong>Ship production apps from a single sentence.</strong><br/>
-  An AI orchestration framework that plans, designs, builds, reviews, and deploys software<br/>using a structured multi-agent pipeline — not a chat window.
+  <strong>One command. No prompts. Come back to a full app pushed to GitHub.</strong><br/>
+  Autonomous AI that plans, builds, reviews, and deploys software — zero human intervention.<br/>Give it a sentence before lunch. Come back to a production-ready app.
 </p>
 
 <br/>

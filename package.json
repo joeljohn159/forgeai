@@ -1,7 +1,7 @@
 {
   "name": "forgecraft",
   "version": "2.0.0",
-  "description": "AI Development Orchestration Framework — structured multi-agent pipeline for building software with human oversight",
+  "description": "One command. No prompts. Come back to a full app pushed to GitHub. Autonomous AI that plans, builds, reviews, and deploys — zero human intervention.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

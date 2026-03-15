@@ -30,16 +30,53 @@ export async function startCommand() {
     }
   }
 
-  // Auto-detect from project files if no adapter or generic
-  if (!devCommand || devCommand === "npm run dev") {
-    devCommand = detectDevCommand();
-    if (!config) {
-      label = detectProjectType();
+  // Always verify the command actually exists in package.json scripts
+  // Adapters may return "npm run dev" as default even when no dev script exists
+  const detected = detectDevCommand();
+  if (detected) {
+    devCommand = detected;
+  } else if (devCommand) {
+    // Adapter gave us a command — verify it if it's an npm script
+    const npmMatch = devCommand.match(/^npm run (\S+)$/);
+    if (npmMatch) {
+      const scriptName = npmMatch[1];
+      const pkgPath = path.join(process.cwd(), "package.json");
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+        if (!pkg.scripts?.[scriptName]) {
+          // Script doesn't exist — show available scripts
+          devCommand = null;
+        }
+      } catch {
+        devCommand = null;
+      }
     }
+  }
+
+  if (!config && detected) {
+    label = detectProjectType();
   }
 
   if (!devCommand) {
     console.log(chalk.red("  Could not detect how to start this project.\n"));
+
+    // Show available scripts if package.json exists
+    const pkgPath = path.join(process.cwd(), "package.json");
+    if (existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+        const scripts = Object.keys(pkg.scripts || {});
+        if (scripts.length > 0) {
+          console.log(chalk.dim("  Available scripts in package.json:"));
+          for (const s of scripts) {
+            console.log(chalk.white(`    npm run ${s}`));
+          }
+          console.log("");
+          return;
+        }
+      } catch { /* ignore */ }
+    }
+
     console.log(chalk.dim("  Expected one of:"));
     console.log(chalk.dim("    - package.json with dev/start/serve script"));
     console.log(chalk.dim("    - manage.py (Django)"));

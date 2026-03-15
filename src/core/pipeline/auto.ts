@@ -46,6 +46,8 @@ export class AutoPipeline {
   private startTime: number = 0;
   private totalUsage: WorkerUsage = { inputTokens: 0, outputTokens: 0, costUsd: 0, durationMs: 0 };
   private shuttingDown = false;
+  private activeSpinner: Ora | null = null;
+  private tagCounter = 1;
 
   constructor(config: ForgeConfig, options: AutoPipelineOptions = {}) {
     this.config = config;
@@ -68,8 +70,13 @@ export class AutoPipeline {
 
   private setupGracefulShutdown(): void {
     const handler = async () => {
-      if (this.shuttingDown) return; // Prevent double shutdown
+      if (this.shuttingDown) return;
       this.shuttingDown = true;
+
+      // Stop spinner so shutdown message is visible
+      if (this.activeSpinner?.isSpinning) {
+        this.activeSpinner.stop();
+      }
 
       console.log(chalk.yellow("\n\n  Interrupted — saving progress..."));
 
@@ -113,6 +120,12 @@ export class AutoPipeline {
       (s) => s.status === "planned" || s.status === "design-approved"
     );
     const needsReview = allStories.some((s) => s.status === "reviewing");
+
+    if (!needsDesign && !needsBuild && !needsReview) {
+      console.log(chalk.green("  Nothing to resume — all stories are complete or blocked.\n"));
+      this.stopChatListener();
+      return { success: true, plan: this.plan, errors };
+    }
 
     // Design (only stories not yet designed)
     if (needsDesign && !this.options.skipDesign) {
@@ -168,19 +181,16 @@ export class AutoPipeline {
 
     this.startChatListener();
 
-    // Init git in parallel — both calls are independent
-    await Promise.all([
-      this.git.ensureRepo(),
-      // ensureMainBranch depends on ensureRepo internally, but
-      // ensureRepo is idempotent and fast if already initialized
-    ]);
+    await this.git.ensureRepo();
     await this.git.ensureMainBranch();
 
     // ── Plan ───────────────────────────────────────────────
     const planSpinner = ora({ text: `${this.elapsed()} Planning...`, indent: 2 }).start();
+    this.activeSpinner = planSpinner;
     try {
       this.plan = await this.orchestrator.generatePlan(description);
       planSpinner.succeed(`${this.elapsed()} Plan ready`);
+      this.activeSpinner = null;
       this.displayPlan(this.plan);
       await stateManager.savePlan(this.plan);
       await stateManager.updatePhase("plan");
@@ -191,6 +201,7 @@ export class AutoPipeline {
       await this.syncToGitHub(this.plan);
     } catch (err) {
       planSpinner.fail(`${this.elapsed()} Planning failed`);
+      this.activeSpinner = null;
       const msg = err instanceof Error ? err.message : String(err);
       console.log(chalk.red(`\n  ${msg}`));
       if (err instanceof Error && err.stack) {
@@ -204,11 +215,10 @@ export class AutoPipeline {
 
     // ── Design ─────────────────────────────────────────────
     if (this.options.skipDesign) {
-      // Mark all UI stories as design-approved so build can proceed
+      // Mark all stories as ready for build (skip design = treat as approved)
       for (const story of this.getAllStories(this.plan)) {
         if (story.status === "planned") {
-          story.designApproved = false;
-          story.status = "planned";
+          story.designApproved = true;
         }
       }
       console.log(chalk.dim(`\n  Design skipped (--skip-design)\n`));
@@ -272,7 +282,7 @@ export class AutoPipeline {
         await stateManager.savePlan(this.plan);
         await stateManager.updatePhase(phase as any);
         await this.git.commitAll(`forge: save progress (${phase} interrupted)`);
-        console.log(chalk.dim(`  Progress saved. Resume with: forge auto --resume\n`));
+        console.log(chalk.dim(`  Progress saved. Resume with: forge resume\n`));
       }
     } catch {
       // Best-effort — don't let save failure mask the original error
@@ -283,9 +293,9 @@ export class AutoPipeline {
 
   private elapsed(): string {
     const sec = Math.floor((Date.now() - this.startTime) / 1000);
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return chalk.dim(`[${m}:${s.toString().padStart(2, "0")}]`);
+    const minutes = Math.floor(sec / 60);
+    const seconds = sec % 60;
+    return chalk.dim(`[${minutes}:${seconds.toString().padStart(2, "0")}]`);
   }
 
   // ── Progress Helper with Timer ────────────────────────────
@@ -303,11 +313,12 @@ export class AutoPipeline {
     const update = () => {
       if (!spinner.isSpinning) return;
       const prefix = this.elapsed();
-      spinner.text = `${prefix} ${storyTitle}${lastDetail ? " " + chalk.dim(lastDetail) : ""}`;
+      const detail = lastDetail ? " " + chalk.dim(lastDetail) : "";
+      spinner.text = `${prefix} ${storyTitle}${detail}`;
     };
 
-    // Tick every second so the timer stays fresh even when the agent is thinking
-    const interval = setInterval(update, 1000);
+    // Tick every 5 seconds — keeps timer fresh without excessive terminal redraws
+    const interval = setInterval(update, 5000);
 
     const onProgress: WorkerProgressCallback = (event) => {
       switch (event.type) {
@@ -336,7 +347,16 @@ export class AutoPipeline {
 
   private showInputHint(): void {
     if (process.stdout.isTTY && !this.options.quiet) {
-      process.stdout.write(chalk.dim("  > "));
+      // Stop spinner briefly so the hint is visible
+      const wasSpinning = this.activeSpinner?.isSpinning ?? false;
+      const spinnerText = this.activeSpinner?.text ?? "";
+      if (wasSpinning) this.activeSpinner!.stop();
+
+      process.stdout.write(chalk.dim("\n  ─ type a message and press enter ─\n  > "));
+
+      if (wasSpinning && this.activeSpinner) {
+        this.activeSpinner.start(spinnerText);
+      }
     }
   }
 
@@ -345,23 +365,47 @@ export class AutoPipeline {
   private groupByDependency(stories: Story[]): Story[][] {
     const batches: Story[][] = [];
     const completed = new Set<string>();
-    const remaining = [...stories];
+    const remaining = new Set(stories.map((s) => s.id));
+    const storyMap = new Map(stories.map((s) => [s.id, s]));
 
-    while (remaining.length > 0) {
-      const batch = remaining.filter((s) =>
-        s.dependencies.every((dep) => completed.has(dep))
-      );
+    // Also treat already-done stories as completed deps
+    if (this.plan) {
+      for (const s of this.getAllStories(this.plan)) {
+        if (s.status === "done" || s.status === "reviewing") {
+          completed.add(s.id);
+        }
+      }
+    }
+
+    let iterations = 0;
+    const maxIterations = stories.length + 1; // Safety: prevent infinite loop on circular deps
+
+    while (remaining.size > 0 && iterations < maxIterations) {
+      iterations++;
+
+      const batch: Story[] = [];
+      for (const id of remaining) {
+        const story = storyMap.get(id)!;
+        const depsReady = story.dependencies.every(
+          (dep) => completed.has(dep) || !remaining.has(dep) // dep done or not in buildable set
+        );
+        if (depsReady) {
+          batch.push(story);
+        }
+      }
 
       if (batch.length === 0) {
-        // Remaining stories have circular or unresolvable deps — run sequentially
-        batches.push(...remaining.map((s) => [s]));
+        // Circular deps — break the cycle by running remaining stories sequentially
+        for (const id of remaining) {
+          batches.push([storyMap.get(id)!]);
+        }
         break;
       }
 
       batches.push(batch);
       for (const s of batch) {
         completed.add(s.id);
-        remaining.splice(remaining.indexOf(s), 1);
+        remaining.delete(s.id);
       }
     }
 
@@ -371,12 +415,14 @@ export class AutoPipeline {
   // ── Design Phase (parallel) ───────────────────────────────
 
   private async runDesignPhase(plan: Plan): Promise<void> {
-    const uiStories = this.getStoriesByType(plan, ["ui", "fullstack"]);
+    const uiStories = this.getStoriesByType(plan, ["ui", "fullstack"]).filter(
+      (s) => s.status === "planned"
+    );
     if (uiStories.length === 0) return;
 
     console.log(chalk.bold(`\n  Design`) + chalk.dim(` · ${uiStories.length} stories\n`));
 
-    // All design stories are independent — run in parallel
+    // Design stories are independent — run in parallel
     if (uiStories.length > 1) {
       await Promise.all(
         uiStories.map((story, i) =>
@@ -404,9 +450,12 @@ export class AutoPipeline {
   ): Promise<void> {
     const label = `[${index}/${total}] ${story.title}`;
     const spinner = ora({ text: `${this.elapsed()} ${label}`, indent: 2 }).start();
+    this.activeSpinner = spinner;
     const progress = this.makeProgress(spinner, label);
 
     try {
+      story.status = "designing";
+
       const prompt = this.orchestrator.craftWorkerPrompt(story, "design", { plan });
       const result = await this.worker.run("design", prompt, {
         onProgress: progress.onProgress,
@@ -419,13 +468,17 @@ export class AutoPipeline {
 
       if (result.success) {
         spinner.succeed(`${this.elapsed()} ${label} ${tokens}`);
+        story.designApproved = true;
+        story.status = "design-approved";
       } else {
         spinner.warn(`${this.elapsed()} ${label}` + chalk.dim(" skipped") + ` ${tokens}`);
+        // Still mark as design-approved so build can proceed
+        story.designApproved = false;
+        story.status = "design-approved";
       }
-      story.designApproved = true;
-      story.status = "design-approved";
     } finally {
       progress.stop();
+      this.activeSpinner = null;
     }
   }
 
@@ -447,14 +500,21 @@ export class AutoPipeline {
         storyIndex++;
         await this.buildSingleStory(batch[0], plan, storyIndex, buildable.length, false);
       } else {
-        // Parallel batch — stories run concurrently on the current branch
+        // Parallel batch — stories run concurrently
         console.log(chalk.dim(`  ${this.elapsed()} parallel: ${batch.map((s) => s.title).join(", ")}`));
 
-        const promises = batch.map((story) => {
+        // Capture indices before async work
+        const indexedBatch = batch.map((story) => {
           storyIndex++;
-          return this.buildSingleStory(story, plan, storyIndex, buildable.length, true);
+          return { story, index: storyIndex };
         });
-        await Promise.all(promises);
+
+        // Run in parallel but do NOT let parallel builds commit individually
+        await Promise.all(
+          indexedBatch.map(({ story, index }) =>
+            this.buildSingleStory(story, plan, index, buildable.length, true)
+          )
+        );
 
         // Commit all parallel changes together
         const builtTitles = batch
@@ -482,6 +542,7 @@ export class AutoPipeline {
   ): Promise<void> {
     const label = `[${index}/${total}] ${story.title}`;
     const spinner = ora({ text: `${this.elapsed()} ${label}`, indent: 2 }).start();
+    this.activeSpinner = spinner;
     const progress = this.makeProgress(spinner, label);
 
     try {
@@ -526,9 +587,14 @@ export class AutoPipeline {
         for (const error of result.errors) {
           console.log(chalk.red(`    ${error}`));
         }
+        // Show max-turns warning prominently
+        if (result.errors.some((e) => e.includes("safety cap"))) {
+          console.log(chalk.yellow(`    Tip: Story may be too large. Try splitting it into smaller stories.`));
+        }
       }
     } finally {
       progress.stop();
+      this.activeSpinner = null;
     }
   }
 
@@ -542,6 +608,7 @@ export class AutoPipeline {
 
     const label = "README.md";
     const spinner = ora({ text: `${this.elapsed()} Generating ${label}`, indent: 2 }).start();
+    this.activeSpinner = spinner;
     const progress = this.makeProgress(spinner, label);
 
     try {
@@ -585,6 +652,7 @@ export class AutoPipeline {
       }
     } finally {
       progress.stop();
+      this.activeSpinner = null;
     }
   }
 
@@ -598,7 +666,11 @@ export class AutoPipeline {
       playSound();
     }
 
-    // Pause readline so inquirer can take over stdin
+    // Stop spinner and chat listener so inquirer can take over stdin cleanly
+    if (this.activeSpinner?.isSpinning) {
+      this.activeSpinner.stop();
+      this.activeSpinner = null;
+    }
     this.stopChatListener();
 
     console.log("");
@@ -634,6 +706,7 @@ export class AutoPipeline {
       const story = reviewable[i];
       const label = `[${i + 1}/${reviewable.length}] ${story.title}`;
       const spinner = ora({ text: `${this.elapsed()} ${label}`, indent: 2 }).start();
+      this.activeSpinner = spinner;
       const progress = this.makeProgress(spinner, label);
 
       try {
@@ -674,6 +747,7 @@ export class AutoPipeline {
         }
       } finally {
         progress.stop();
+        this.activeSpinner = null;
       }
 
       await stateManager.savePlan(plan);
@@ -688,7 +762,7 @@ export class AutoPipeline {
 
   private async autoFix(
     story: Story,
-    plan: Plan,
+    _plan: Plan,
     reviewSummary: string,
     spinner: Ora,
     label: string
@@ -700,15 +774,20 @@ export class AutoPipeline {
       Fix them. Make minimal changes. Then re-run build/lint/typecheck to verify.
     `;
 
-    const result = await this.worker.run("fix", fixPrompt, {
-      onProgress: this.makeProgress(spinner, label + chalk.dim(" fix")).onProgress,
-    });
+    const fixProgress = this.makeProgress(spinner, label + chalk.dim(" fix"));
+    try {
+      const result = await this.worker.run("fix", fixPrompt, {
+        onProgress: fixProgress.onProgress,
+      });
 
-    if (result.success) {
-      await this.git.commitAll(`fix: review issues in ${story.title}`);
-      return true;
+      if (result.success) {
+        await this.git.commitAll(`fix: review issues in ${story.title}`);
+        return true;
+      }
+      return false;
+    } finally {
+      fixProgress.stop();
     }
-    return false;
   }
 
   // ── Deploy Phase (optional) ───────────────────────────────
@@ -718,11 +797,13 @@ export class AutoPipeline {
 
     const label = "GitHub Pages";
     const spinner = ora({ text: `${this.elapsed()} Configuring ${label}`, indent: 2 }).start();
+    this.activeSpinner = spinner;
     const progress = this.makeProgress(spinner, label);
 
     try {
+      const framework = plan.framework || "Next.js";
       const prompt = `
-        Set up GitHub Pages deployment for this Next.js project.
+        Set up GitHub Pages deployment for this ${framework} project.
 
         1. Update next.config.js or next.config.ts to add: output: "export"
            (merge with existing config, do not overwrite other settings)
@@ -749,6 +830,7 @@ export class AutoPipeline {
       }
     } finally {
       progress.stop();
+      this.activeSpinner = null;
     }
   }
 
@@ -760,7 +842,6 @@ export class AutoPipeline {
 
     this.rl = readline.createInterface({
       input: process.stdin,
-      // Don't bind output — avoids interference with ora spinners
       terminal: false,
     });
 
@@ -775,7 +856,13 @@ export class AutoPipeline {
       });
 
       const count = this.chatQueue.length;
-      // Clear the current line (user's typed text) and show confirmation
+
+      // Pause the active spinner so our output doesn't collide
+      const wasSpinning = this.activeSpinner?.isSpinning ?? false;
+      const spinnerText = this.activeSpinner?.text ?? "";
+      if (wasSpinning) this.activeSpinner!.stop();
+
+      // Clear the current line and show confirmation
       if (process.stdout.isTTY) {
         process.stdout.write(`\r\x1b[K`);
       }
@@ -783,8 +870,12 @@ export class AutoPipeline {
         chalk.green(`  [queued${count > 1 ? ` #${count}` : ""}]`) +
           chalk.dim(` ${msg}`)
       );
-      // Re-show the input hint so user knows they can keep typing
-      this.showInputHint();
+      console.log(chalk.dim("  > "));
+
+      // Resume spinner if it was running
+      if (wasSpinning && this.activeSpinner) {
+        this.activeSpinner.start(spinnerText);
+      }
     });
   }
 
@@ -798,31 +889,57 @@ export class AutoPipeline {
   private async processChatQueue(): Promise<void> {
     if (this.chatQueue.length === 0) return;
 
-    console.log(chalk.dim(`\n  Processing ${this.chatQueue.length} queued message${this.chatQueue.length > 1 ? "s" : ""}...\n`));
-
-    for (const change of this.chatQueue) {
-      const state = await stateManager.getState();
-      const decision = await this.orchestrator.routeUserInput(change.message, state);
-
-      if (decision.action === "answer" && decision.response) {
-        console.log(chalk.white(`  > ${change.message}`));
-        console.log(chalk.dim(`    ${decision.response}\n`));
-      } else if (decision.action === "route-to-worker" && decision.prompt) {
-        const mode = decision.workerMode || "fix";
-        const spinner = ora({ text: change.message, indent: 2 }).start();
-        const result = await this.worker.run(mode, decision.prompt);
-        if (result.success) {
-          await this.git.commitAll(`fix: ${change.message}`);
-          spinner.succeed(change.message);
-        } else {
-          spinner.fail(change.message);
-        }
-      } else if (decision.action === "add-story") {
-        console.log(chalk.dim(`  + Story added: ${change.message}`));
-      }
+    // Stop spinner while processing queue messages
+    if (this.activeSpinner?.isSpinning) {
+      this.activeSpinner.stop();
     }
 
+    console.log(chalk.dim(`\n  Processing ${this.chatQueue.length} queued message${this.chatQueue.length > 1 ? "s" : ""}...\n`));
+
+    const messages = [...this.chatQueue];
     this.chatQueue = [];
+
+    for (const change of messages) {
+      try {
+        const state = await stateManager.getState();
+        const decision = await this.orchestrator.routeUserInput(change.message, state);
+
+        if (decision.action === "answer" && decision.response) {
+          console.log(chalk.white(`  > ${change.message}`));
+          console.log(chalk.dim(`    ${decision.response}\n`));
+        } else if (decision.action === "route-to-worker" && decision.prompt) {
+          const mode = decision.workerMode || "fix";
+          const spinner = ora({ text: change.message, indent: 2 }).start();
+          const result = await this.worker.run(mode, decision.prompt);
+          if (result.success) {
+            await this.git.commitAll(`fix: ${change.message}`);
+            spinner.succeed(change.message);
+          } else {
+            spinner.fail(change.message);
+          }
+        } else if (decision.action === "add-story" && this.plan) {
+          const newStory: Story = {
+            id: `story-${Date.now()}`,
+            title: decision.story?.title || change.message,
+            description: decision.story?.description || change.message,
+            type: (decision.story?.type as any) || "fullstack",
+            status: "planned",
+            branch: null,
+            designApproved: false,
+            tags: [],
+            priority: 99,
+            dependencies: [],
+          };
+          // Add to last epic
+          if (this.plan.epics.length > 0) {
+            this.plan.epics[this.plan.epics.length - 1].stories.push(newStory);
+            console.log(chalk.dim(`  + Story added: ${newStory.title}`));
+          }
+        }
+      } catch (err) {
+        console.log(chalk.dim(`  Could not process: ${change.message}`));
+      }
+    }
   }
 
   // ── Summary ───────────────────────────────────────────────
@@ -903,8 +1020,6 @@ export class AutoPipeline {
   }
 
   // ── Helpers ───────────────────────────────────────────────
-
-  private tagCounter = 2;
 
   private displayPlan(plan: Plan): void {
     console.log(chalk.bold(`\n  ${plan.project}`) + chalk.dim(` · ${plan.framework}`));

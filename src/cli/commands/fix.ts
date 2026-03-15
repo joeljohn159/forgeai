@@ -1,16 +1,18 @@
 // ============================================================
 // forge fix "description" — Fix a bug or make a small change
 // Works on main. No branch switching.
+// Supports --image flag to attach a screenshot for context.
 // ============================================================
 
 import chalk from "chalk";
 import ora from "ora";
+import { existsSync } from "fs";
 import { stateManager } from "../../state/index.js";
 import { Orchestrator } from "../../core/orchestrator/index.js";
 import { Worker } from "../../core/worker/index.js";
 import { GitManager } from "../../core/git/index.js";
 
-export async function fixCommand(description: string) {
+export async function fixCommand(description: string, options?: { image?: string }) {
   const config = await stateManager.getConfig();
   if (!config) {
     console.log(chalk.red("\n  Forge not initialized. Run: forge init\n"));
@@ -22,8 +24,18 @@ export async function fixCommand(description: string) {
     return;
   }
 
+  // Validate image path if provided
+  if (options?.image && !existsSync(options.image)) {
+    console.log(chalk.red(`\n  Image not found: ${options.image}\n`));
+    return;
+  }
+
   console.log(chalk.bold("\n  forge fix\n"));
-  console.log(chalk.dim(`  "${description}"\n`));
+  console.log(chalk.dim(`  "${description}"`));
+  if (options?.image) {
+    console.log(chalk.dim(`  image: ${options.image}`));
+  }
+  console.log("");
 
   const orchestrator = new Orchestrator(config);
   const worker = new Worker(config, {});
@@ -56,7 +68,13 @@ export async function fixCommand(description: string) {
         commitBefore: headBefore,
       });
 
-      const result = await worker.run(mode, decision.prompt || description, {
+      // Build prompt — include image reference if provided
+      let fixPrompt = decision.prompt || description;
+      if (options?.image) {
+        fixPrompt += `\n\nA screenshot has been saved at: ${options.image}\nRead this image file to see the visual issue the user is referring to.`;
+      }
+
+      const result = await worker.run(mode, fixPrompt, {
         onProgress: (event) => {
           if (event.type === "tool_use") {
             spinner.text = event.content;

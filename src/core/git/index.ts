@@ -47,9 +47,16 @@ export class GitManager {
 
   async getCurrentBranch(): Promise<string> {
     if (this.cachedBranch) return this.cachedBranch;
-    const status = await this.git.status();
-    this.cachedBranch = status.current || "main";
-    return this.cachedBranch;
+    try {
+      const status = await this.git.status();
+      if (status.current) {
+        this.cachedBranch = status.current;
+        return this.cachedBranch;
+      }
+    } catch {
+      // Don't cache on error — let next call retry
+    }
+    return "main";
   }
 
   async listBranches(): Promise<string[]> {

@@ -134,7 +134,22 @@ export class Worker {
       onProgress?: WorkerProgressCallback;
     } = {}
   ): Promise<WorkerResult> {
-    const workingDir = options.workingDir || this.sandboxOpts.workingDir || process.cwd();
+    let workingDir = options.workingDir || this.sandboxOpts.workingDir;
+    if (!workingDir) {
+      try {
+        workingDir = process.cwd();
+      } catch {
+        // CWD was deleted (EPERM uv_cwd) — use the sandbox working dir or fail gracefully
+        return {
+          success: false,
+          filesCreated: [],
+          filesModified: [],
+          errors: ["Working directory no longer exists. Please cd to your project and retry."],
+          summary: "",
+          usage: { inputTokens: 0, outputTokens: 0, costUsd: 0, durationMs: 0 },
+        };
+      }
+    }
     const { onProgress } = options;
 
     const result: WorkerResult = {

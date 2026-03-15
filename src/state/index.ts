@@ -208,8 +208,13 @@ class StateManager {
       const data = JSON.parse(content) as T;
       this.cache.set(filePath, { data, mtime });
       return data;
-    } catch {
-      return null;
+    } catch (err: any) {
+      // File not found is expected — return null
+      if (err?.code === "ENOENT") return null;
+      // JSON parse error — file is corrupted, return null
+      if (err instanceof SyntaxError) return null;
+      // Permission or other system errors — propagate so caller knows
+      throw err;
     }
   }
 

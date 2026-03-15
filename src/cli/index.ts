@@ -19,6 +19,7 @@ import { doctorCommand } from "./commands/doctor.js";
 import { cleanCommand } from "./commands/clean.js";
 import { exportCommand } from "./commands/export.js";
 import { historyCommand, checkoutCommand } from "./commands/history.js";
+import { startCommand } from "./commands/start.js";
 
 const program = new Command();
 
@@ -92,6 +93,11 @@ program
   .option("-s, --story <storyId>", "Review a specific story only")
   .action(reviewCommand);
 
+program
+  .command("start")
+  .description("Start the dev server for the current project")
+  .action(startCommand);
+
 // ── Utilities ────────────────────────────────────────────
 
 program
@@ -112,6 +118,7 @@ program
 program
   .command("fix <description>")
   .description("Fix a bug or make a small change")
+  .option("-i, --image <path>", "Attach a screenshot for visual context")
   .action(fixCommand);
 
 program

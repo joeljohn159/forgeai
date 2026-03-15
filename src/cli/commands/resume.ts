@@ -5,6 +5,8 @@
 
 import chalk from "chalk";
 import inquirer from "inquirer";
+import fs from "fs";
+import path from "path";
 import { stateManager } from "../../state/index.js";
 import { AutoPipeline } from "../../core/pipeline/auto.js";
 import type { Plan, Story } from "../../types/plan.js";
@@ -15,6 +17,21 @@ export async function resumeCommand(options: {
   mute?: boolean;
   skipDesign?: boolean;
 }) {
+  // Validate working directory exists and is accessible (prevents EPERM uv_cwd)
+  let workingDir: string;
+  try {
+    workingDir = process.cwd();
+  } catch {
+    // CWD was deleted (e.g., by a prior interrupted build). Fall back to home dir
+    // and look for the project from the forge state files.
+    const home = process.env.HOME || process.env.USERPROFILE || "/tmp";
+    process.chdir(home);
+    console.log(chalk.yellow("\n  Working directory no longer exists."));
+    console.log(chalk.dim(`  Falling back to: ${home}`));
+    console.log(chalk.dim("  Please cd to your project directory and retry.\n"));
+    return;
+  }
+
   const config = await stateManager.getConfig();
   if (!config) {
     console.log(chalk.red("\n  Forge not initialized. Run: forge init\n"));

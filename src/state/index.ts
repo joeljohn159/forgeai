@@ -195,6 +195,48 @@ class StateManager {
     return manifest?.map((r) => r.saved) || [];
   }
 
+  // ── Lockfile ────────────────────────────────────────────
+
+  async acquireLock(): Promise<boolean> {
+    const lockPath = this.forgePath("forge.lock");
+    try {
+      // Check if lock exists and is stale (older than 2 hours)
+      const stat = await fs.stat(lockPath).catch(() => null);
+      if (stat) {
+        const ageMs = Date.now() - stat.mtimeMs;
+        if (ageMs < 2 * 60 * 60 * 1000) {
+          // Lock is fresh — another instance is running
+          const content = await fs.readFile(lockPath, "utf-8").catch(() => "");
+          return false;
+        }
+        // Stale lock — remove it
+      }
+      await fs.mkdir(path.dirname(lockPath), { recursive: true });
+      await fs.writeFile(lockPath, JSON.stringify({
+        pid: process.pid,
+        started: new Date().toISOString(),
+      }));
+      return true;
+    } catch {
+      return true; // Can't create lock — proceed anyway
+    }
+  }
+
+  async releaseLock(): Promise<void> {
+    const lockPath = this.forgePath("forge.lock");
+    await fs.unlink(lockPath).catch(() => {});
+  }
+
+  async getLockInfo(): Promise<{ pid: number; started: string } | null> {
+    const lockPath = this.forgePath("forge.lock");
+    try {
+      const content = await fs.readFile(lockPath, "utf-8");
+      return JSON.parse(content);
+    } catch {
+      return null;
+    }
+  }
+
   // ── Helpers ───────────────────────────────────────────────
 
   private async readJson<T>(filePath: string): Promise<T | null> {
@@ -215,10 +257,25 @@ class StateManager {
     } catch (err: any) {
       // File not found is expected — return null
       if (err?.code === "ENOENT") return null;
-      // JSON parse error — file is corrupted, return null
-      if (err instanceof SyntaxError) return null;
-      // Permission or other system errors — propagate so caller knows
-      throw err;
+      // JSON parse error — file is corrupted
+      if (err instanceof SyntaxError) {
+        // Try to read the backup (.bak) if the main file is corrupted
+        const bakPath = filePath + ".bak";
+        try {
+          const bakContent = await fs.readFile(bakPath, "utf-8");
+          return JSON.parse(bakContent) as T;
+        } catch {
+          // No backup either — return null
+        }
+        return null;
+      }
+      // Permission or other system errors — wrap with helpful message
+      const code = err?.code || "UNKNOWN";
+      throw new Error(
+        `Cannot read ${path.basename(filePath)} (${code}): ${err?.message || err}\n` +
+        `  Path: ${filePath}\n` +
+        `  Fix: Check file permissions or run: forge clean`
+      );
     }
   }
 
@@ -230,7 +287,16 @@ class StateManager {
       this.dirCreated.add(dir);
     }
     const json = JSON.stringify(data, null, 2);
-    await fs.writeFile(filePath, json);
+    // Atomic write: write to temp file then rename to prevent corruption on crash
+    const tmpFile = filePath + ".tmp";
+    try {
+      await fs.writeFile(tmpFile, json);
+      await fs.rename(tmpFile, filePath);
+    } catch (err) {
+      // Clean up temp file on failure
+      await fs.unlink(tmpFile).catch(() => {});
+      throw err;
+    }
     // Update cache immediately — avoid re-reading what we just wrote
     const stat = await fs.stat(filePath);
     this.cache.set(filePath, { data, mtime: stat.mtimeMs });

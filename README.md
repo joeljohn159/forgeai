@@ -1,5 +1,6 @@
 <p align="center">
   <img src="https://img.shields.io/npm/v/forgecraft?style=flat-square&color=000" alt="npm version" />
+  <img src="https://img.shields.io/npm/dm/forgecraft?style=flat-square&color=000" alt="npm downloads" />
   <img src="https://img.shields.io/badge/node-%3E%3D18-000?style=flat-square" alt="node version" />
   <img src="https://img.shields.io/github/license/joeljohn159/forgeai?style=flat-square&color=000" alt="license" />
   <img src="https://img.shields.io/badge/frameworks-Next.js%20%7C%20React%20%7C%20Django%20%7C%20Any-000?style=flat-square" alt="frameworks" />
@@ -244,6 +245,15 @@ Generate a self-contained interactive HTML dashboard for any project. No externa
 - **Diff Mode** — Compare current scan vs previous (added/removed/changed files, line deltas, health score change). Snapshots saved automatically to `.forge/viz-snapshot.json`
 - **File Detail** — Click any file to see stats, exports, routes, dependencies, dependents, first 25 lines of code preview with line numbers, and an "Open in VS Code" button that reuses your existing window
 - **Search** — Press `/` to fuzzy-search files across the sidebar
+
+### Production-Grade Reliability
+ForgeAI is designed to handle real-world failure modes gracefully:
+- **Atomic writes** — state files are written to temp files then atomically renamed, so a crash mid-write never corrupts your sprint
+- **Lockfile protection** — prevents concurrent `forge auto` runs from stomping on each other
+- **Auth recovery** — if your Claude session expires mid-build, Forge detects it, notifies you, and auto-retries after you re-authenticate
+- **Graceful shutdown** — Ctrl+C saves progress and commits, so `forge resume` can continue from where you left off
+- **Dependency validation** — invalid story dependencies are caught during planning, not during the build
+- **Global error handlers** — unhandled errors show clean troubleshooting steps, not stack traces
 
 ### Sprint Resume
 If a build gets interrupted (auth expires, network drops, you close the terminal), your progress is saved. Run `forge resume` to pick up exactly where you left off. Blocked stories can be retried.
@@ -497,6 +507,7 @@ After `forge init`, your `forge.config.json` controls:
 - Published as `forgecraft` on npm
 
 **v2.0** — Current
+- **Existing project support** — auto-detects framework from existing `package.json`, `manage.py`, `pubspec.yaml`, or `Cargo.toml` and initializes Forge automatically. Builds on top of existing code instead of recreating files.
 - **`forge viz`** — Interactive project visualizer with self-contained HTML dashboard
   - Code health score (A-F grade) with detailed breakdown
   - Circular dependency detection (DFS-based, capped at 50 cycles)
@@ -513,7 +524,20 @@ After `forge init`, your `forge.config.json` controls:
 - **`forge cicd`** — CI/CD pipeline generation (GitHub Actions, GitLab CI)
 - **`forge template`** — starter app template browser
 - **`forge upgrade`** — self-update command
+- **`forge claude`** — launch Claude Code CLI in the current project
 - 29 CLI commands total
+
+**v2.0.3** — Production Hardening
+- **Atomic state writes** — state files written to temp then renamed, preventing corruption on crash or power loss
+- **Concurrent run protection** — lockfile prevents two `forge auto` processes from corrupting the same project
+- **Global error handlers** — uncaught exceptions and unhandled rejections show clean error messages with troubleshooting steps instead of raw stack traces
+- **Better error messages everywhere** — chat queue processing, GitHub sync, file system errors, JSON parse failures all show the actual reason instead of generic messages
+- **Dependency validation** — invalid story dependencies (referencing non-existent stories) are filtered out during plan generation instead of causing silent build order bugs
+- **Epic structure validation** — malformed plans from Claude are caught early with descriptive errors
+- **Git conflict handling** — merge conflicts abort cleanly with instructions instead of leaving the repo in a broken state
+- **Git branch validation** — `getDiff` throws a helpful error when the target branch doesn't exist
+- **Graceful tag handling** — existing tags are force-replaced instead of crashing the pipeline
+- **Dynamic version** — `forge --version` reads from `package.json` instead of a hardcoded string
 
 ---
 

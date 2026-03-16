@@ -38,7 +38,20 @@ export class GitManager {
   }
 
   async merge(branch: string): Promise<void> {
-    await this.git.merge([branch, "--no-ff"]);
+    try {
+      await this.git.merge([branch, "--no-ff"]);
+    } catch (err: any) {
+      // Abort the merge to leave repo in a clean state
+      await this.git.merge(["--abort"]).catch(() => {});
+      const msg = err?.message || "";
+      if (msg.includes("CONFLICT") || msg.includes("merge conflict")) {
+        throw new Error(
+          `Merge conflict when merging "${branch}". The merge has been aborted.\n` +
+          `  Resolve manually: git merge ${branch}`
+        );
+      }
+      throw err;
+    }
   }
 
   async deleteBranch(branch: string): Promise<void> {
@@ -111,7 +124,16 @@ export class GitManager {
   // ── Diff & History ────────────────────────────────────────
 
   async getDiff(branch: string): Promise<string> {
-    return this.git.diff(["main", branch]);
+    try {
+      return await this.git.diff(["main", branch]);
+    } catch (err: any) {
+      // Branch doesn't exist or other error
+      const msg = err?.message || "";
+      if (msg.includes("unknown revision") || msg.includes("bad revision")) {
+        throw new Error(`Branch or ref "${branch}" not found. Check: git branch -a`);
+      }
+      throw err;
+    }
   }
 
   /** Diff between any two refs (tags, commits, branches) */

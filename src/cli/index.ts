@@ -215,6 +215,37 @@ program
   .description("Upgrade Forge to the latest version")
   .action(upgradeCommand);
 
+// ── Global Error Handlers ─────────────────────────────────
+
+process.on("uncaughtException", (err) => {
+  console.error(chalk.red("\n  Unexpected error:"));
+  console.error(chalk.red(`  ${err.message}`));
+  if (err.stack) {
+    const relevantStack = err.stack
+      .split("\n")
+      .filter((line) => line.includes("forge") || line.includes("src/"))
+      .slice(0, 3)
+      .join("\n");
+    if (relevantStack) console.error(chalk.dim(relevantStack));
+  }
+  console.error(chalk.dim("\n  Troubleshooting:"));
+  console.error(chalk.dim("    1. Run: forge doctor"));
+  console.error(chalk.dim("    2. Run: claude login"));
+  console.error(chalk.dim("    3. Report: https://github.com/joeljohn159/forgeai/issues\n"));
+  process.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.error(chalk.red("\n  Unexpected error:"));
+  console.error(chalk.red(`  ${msg}`));
+  console.error(chalk.dim("\n  Troubleshooting:"));
+  console.error(chalk.dim("    1. Run: forge doctor"));
+  console.error(chalk.dim("    2. Run: claude login"));
+  console.error(chalk.dim("    3. Report: https://github.com/joeljohn159/forgeai/issues\n"));
+  process.exit(1);
+});
+
 // ── Parse ─────────────────────────────────────────────────
 
 program.parse();

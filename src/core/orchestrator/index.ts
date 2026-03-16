@@ -111,11 +111,13 @@ export class Orchestrator {
     let rawPlan: any;
     try {
       rawPlan = JSON.parse(this.cleanJson(resultText));
-    } catch {
+    } catch (parseErr) {
       // Show a preview of what was returned for debugging
       const preview = resultText.slice(0, 200).replace(/\n/g, " ");
+      const parseMsg = parseErr instanceof Error ? parseErr.message : "";
       throw new Error(
         `Failed to parse plan — Claude returned text instead of JSON.\n` +
+        `  Parse error: ${parseMsg}\n` +
         `  Preview: "${preview}${resultText.length > 200 ? "..." : ""}"\n` +
         `  Try a more specific description, e.g.: forge auto "build a todo app with React and Express"`
       );
@@ -124,6 +126,21 @@ export class Orchestrator {
     // Validate required fields
     if (!rawPlan.epics || !Array.isArray(rawPlan.epics)) {
       throw new Error("Invalid plan: missing epics array. Try regenerating.");
+    }
+
+    // Validate epic/story structure to prevent crashes later
+    for (const epic of rawPlan.epics) {
+      if (!epic.stories || !Array.isArray(epic.stories)) {
+        throw new Error(`Invalid plan: epic "${epic.title || epic.id}" has no stories array.`);
+      }
+    }
+
+    // Collect all story IDs for dependency validation
+    const allStoryIds = new Set<string>();
+    for (const epic of rawPlan.epics) {
+      for (const story of epic.stories || []) {
+        if (story.id) allStoryIds.add(story.id);
+      }
     }
 
     // Hydrate with default status fields
@@ -146,7 +163,7 @@ export class Orchestrator {
           designApproved: false,
           tags: [],
           priority: story.priority || 1,
-          dependencies: story.dependencies || [],
+          dependencies: (story.dependencies || []).filter((dep: string) => allStoryIds.has(dep)),
         })),
       })),
     };

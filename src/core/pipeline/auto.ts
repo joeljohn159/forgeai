@@ -94,6 +94,7 @@ export class AutoPipeline {
           await this.git.commitAll("forge: save progress (interrupted)");
           console.log(chalk.dim("  Progress saved. Resume with: forge resume\n"));
         }
+        await stateManager.releaseLock();
       } catch {
         console.log(chalk.dim("  Could not save progress.\n"));
       }
@@ -200,6 +201,18 @@ export class AutoPipeline {
     const errors: string[] = [];
     this.startTime = Date.now();
 
+    // Prevent concurrent forge runs on the same project
+    const lockAcquired = await stateManager.acquireLock();
+    if (!lockAcquired) {
+      const lockInfo = await stateManager.getLockInfo();
+      console.log(chalk.red("\n  Another forge process is already running in this directory."));
+      if (lockInfo) {
+        console.log(chalk.dim(`  PID: ${lockInfo.pid} · Started: ${lockInfo.started}`));
+      }
+      console.log(chalk.dim("  If no other process is running, delete .forge/forge.lock and retry.\n"));
+      return { success: false, plan: null, errors: ["Another forge process is running"] };
+    }
+
     console.log(chalk.bold("\n  forge") + chalk.dim(" auto"));
     const flags = [
       `sandbox ${this.options.sandbox !== false ? "on" : "off"}`,
@@ -245,6 +258,7 @@ export class AutoPipeline {
         console.log(chalk.dim("    3. Run: forge doctor\n"));
       }
       this.stopChatListener();
+      await stateManager.releaseLock();
       return { success: false, plan: null, errors: [`Plan: ${msg}`] };
     }
 
@@ -258,6 +272,7 @@ export class AutoPipeline {
           story.designApproved = true;
         }
       }
+      await stateManager.savePlan(this.plan);
       console.log(chalk.dim(`\n  Design skipped (--skip-design)\n`));
     } else {
       try { await this.runDesignPhase(this.plan); }
@@ -331,6 +346,7 @@ export class AutoPipeline {
     this.stopChatListener();
     this.printSummary(errors);
     await stateManager.updatePhase("done");
+    await stateManager.releaseLock();
 
     const allStories = this.getAllStories(this.plan);
     const failedCount = allStories.filter((s) => s.status === "blocked").length;
@@ -1104,7 +1120,9 @@ export class AutoPipeline {
           }
         }
       } catch (err) {
-        console.log(chalk.dim(`  Could not process: ${change.message}`));
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.log(chalk.yellow(`  Could not process: ${change.message}`));
+        console.log(chalk.dim(`    Reason: ${errMsg.slice(0, 120)}`));
       }
     }
   }
@@ -1117,7 +1135,13 @@ export class AutoPipeline {
       ? `${Math.floor(elapsedSec / 60)}m ${Math.round(elapsedSec % 60)}s`
       : `${Math.round(elapsedSec)}s`;
 
-    const allStories = this.getAllStories(this.plan!);
+    if (!this.plan) {
+      console.log(chalk.dim("\n  ─────────────────────────────────"));
+      console.log(chalk.bold("  Done") + chalk.dim(" (no plan loaded)"));
+      console.log("");
+      return;
+    }
+    const allStories = this.getAllStories(this.plan);
     const done = allStories.filter((s) => s.status === "done").length;
     const blocked = allStories.filter((s) => s.status === "blocked").length;
     const total = allStories.length;
@@ -1181,8 +1205,9 @@ export class AutoPipeline {
       if (created > 0 || updated > 0) {
         console.log(chalk.dim(`  GitHub: ${created} issues created, ${updated} updated`));
       }
-    } catch {
-      // Silently skip — GitHub sync is best-effort
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(chalk.dim(`  GitHub sync skipped: ${msg.slice(0, 80)}`));
     }
   }
 

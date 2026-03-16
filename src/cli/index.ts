@@ -28,6 +28,10 @@ import { estimateCommand } from "./commands/estimate.js";
 import { cicdCommand } from "./commands/cicd.js";
 import { vizCommand } from "./commands/viz.js";
 import { claudeCommand } from "./commands/claude.js";
+import { createRequire } from "module";
+
+const require = createRequire(import.meta.url);
+const pkg = require("../../package.json");
 
 const program = new Command();
 
@@ -38,7 +42,7 @@ program
       " — AI Development Orchestration Framework\n" +
       "  Structured multi-agent pipeline: plan → design → build → review"
   )
-  .version("2.0.0");
+  .version(pkg.version);
 
 // ── Pipeline Commands ────────────────────────────────────
 

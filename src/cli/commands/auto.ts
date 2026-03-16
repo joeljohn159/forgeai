@@ -63,11 +63,52 @@ export async function autoCommand(
     return;
   }
 
-  // Config validation
-  const rawConfig = await stateManager.getConfig();
+  // Config validation — auto-init if not initialized
+  let rawConfig = await stateManager.getConfig();
   if (!rawConfig) {
-    console.log(chalk.red("\n  Forge not initialized. Run: forge init\n"));
-    return;
+    // Check if this looks like an existing project
+    const hasPackageJson = existsSync("package.json");
+    const hasManagePy = existsSync("manage.py");
+    const hasPubspec = existsSync("pubspec.yaml");
+    const hasCargo = existsSync("Cargo.toml");
+
+    if (hasPackageJson || hasManagePy || hasPubspec || hasCargo) {
+      console.log(chalk.dim("\n  Existing project detected — auto-initializing Forge...\n"));
+
+      // Auto-detect framework
+      let framework = "other";
+      if (hasPackageJson) {
+        try {
+          const { readFileSync } = await import("fs");
+          const pkg = JSON.parse(readFileSync("package.json", "utf-8"));
+          const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+          if (deps["next"]) framework = "nextjs";
+          else if (deps["nuxt"]) framework = "nuxt";
+          else if (deps["@sveltejs/kit"]) framework = "sveltekit";
+          else if (deps["vue"]) framework = "vue";
+          else if (deps["react"]) framework = "react";
+        } catch { /* ignore */ }
+      } else if (hasManagePy) {
+        framework = "django";
+      } else if (hasPubspec) {
+        framework = "flutter";
+      }
+
+      rawConfig = {
+        framework,
+        model: "sonnet",
+        designPreview: "storybook" as const,
+        githubSync: false,
+        githubRepo: null,
+        autoCommit: true,
+        storybook: { port: 6006 },
+      };
+      await stateManager.saveConfig(rawConfig);
+      console.log(chalk.dim(`  Framework: ${framework}\n`));
+    } else {
+      console.log(chalk.red("\n  Forge not initialized. Run: forge init\n"));
+      return;
+    }
   }
   const config = loadAndValidateConfig(rawConfig);
   if (!config) return;

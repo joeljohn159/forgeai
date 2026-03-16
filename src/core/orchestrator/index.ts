@@ -37,12 +37,33 @@ export class Orchestrator {
       ? `Tech stack: Detect from the user's description below. The user may specify their own framework, language, and tools.`
       : `Framework: ${adapter.name} (${this.config.framework})\n      Language: ${adapter.language}`;
 
+    // Detect if this is an existing project by scanning for source files
+    const existingProjectHint = `
+      IMPORTANT — EXISTING PROJECT DETECTION:
+      Before planning, check if this is an existing project:
+      1. Read package.json, requirements.txt, pubspec.yaml, or Cargo.toml to understand current dependencies
+      2. List the src/ or app/ directory to understand what already exists
+      3. Read any README.md, CLAUDE.md, or docs/ for context
+
+      If source files already exist:
+      - DO NOT recreate files that already exist — build on top of them
+      - Plan stories that ADD to or MODIFY the existing codebase
+      - Reference existing patterns, component styles, and architecture in your story descriptions
+      - Include "Existing files to modify: [list]" in story descriptions where relevant
+      - If the user says "add X" or "upgrade X", treat it as an enhancement to the existing project
+
+      If this is a brand new empty project:
+      - Plan from scratch as usual
+    `;
+
     const prompt = `
-      The user wants to build the following application:
+      The user wants to build the following:
       "${description}"
 
       ${frameworkHint}
       Design support: ${adapter.designSupport ? "yes (Storybook)" : "no"}
+
+      ${existingProjectHint}
 
       IMPORTANT: If the user references any files (like .md, .txt, .pdf, or any document),
       READ those files first to understand the full requirements before planning.
@@ -286,6 +307,13 @@ export class Orchestrator {
       ${existingRef}
 
       ${structureRef}
+
+      CRITICAL — EXISTING CODE RULES:
+      - FIRST read the project's existing files (ls src/, ls app/, etc.) before creating anything
+      - Do NOT overwrite or recreate files that already exist — modify them instead
+      - Match existing code style, naming conventions, and architecture patterns
+      - Import from and extend existing components, utilities, and types
+      - If the project already has a layout/shell/nav, USE it — don't create a duplicate
 
       Technical requirements:
       - Follow existing code patterns in the project

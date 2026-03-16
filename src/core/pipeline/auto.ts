@@ -1030,15 +1030,20 @@ export class AutoPipeline {
       }
       console.log(
         chalk.green(`  [queued${count > 1 ? ` #${count}` : ""}]`) +
-          chalk.dim(` ${msg}`)
+          chalk.dim(` ${msg}`) +
+          chalk.dim(` — will process between stories`)
       );
-      console.log(chalk.dim("  > "));
 
       // Resume spinner if it was running
       if (wasSpinning && this.activeSpinner) {
         this.activeSpinner.start(spinnerText);
       }
     });
+
+    // Show initial input hint on stderr so it doesn't interfere with spinner
+    if (process.stderr.isTTY) {
+      process.stderr.write(chalk.dim("  Type a message anytime to queue feedback\n\n"));
+    }
   }
 
   private stopChatListener(): void {

@@ -108,6 +108,10 @@ class StateManager {
     return this.readJson<ForgeConfig>(this.rootPath(CONFIG_FILE));
   }
 
+  async saveConfig(config: ForgeConfig): Promise<void> {
+    await this.writeJson(this.rootPath(CONFIG_FILE), config);
+  }
+
   async isInitialized(): Promise<boolean> {
     return this.fileExists(this.rootPath(CONFIG_FILE));
   }

@@ -90,7 +90,12 @@ export class GitManager {
   // ── Tag Operations ────────────────────────────────────────
 
   async tag(name: string): Promise<void> {
-    await this.git.addTag(name);
+    try {
+      await this.git.addTag(name);
+    } catch {
+      // Tag already exists — force replace it
+      await this.git.raw(["tag", "-f", name]);
+    }
   }
 
   async listTags(): Promise<string[]> {
